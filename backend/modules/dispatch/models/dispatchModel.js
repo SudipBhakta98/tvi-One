@@ -1,0 +1,1 @@
+import mongoose from "mongoose";const s=new mongoose.Schema({project:{type:mongoose.Schema.Types.ObjectId,ref:"Project",required:true},dispatched_qty:{type:Number,required:true,min:1},date:{type:Date,required:true},vehicle_number:String,customer_reference:String},{timestamps:true});export default mongoose.model("Dispatch",s);

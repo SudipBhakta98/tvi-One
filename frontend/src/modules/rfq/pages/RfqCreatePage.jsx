@@ -1,0 +1,115 @@
+import { useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import api from "../../../services/api";
+import { ENDPOINTS } from "../../../services/endpoints";
+import { Alert, GhostButton, Panel, PrimaryButton } from "../../../components/ui";
+import { FormField, TextInput, TextAreaInput } from "../components/FormControls";
+import RfqFullPage from "../components/RfqFullPage";
+import AttachmentField from "../components/AttachmentField";
+import { STAGES, TARGET_PHASES, blankMain, blankSub, emptyStageSchedule, errorMessage } from "../components/rfqConfig";
+
+const todayInput = () => new Date().toISOString().slice(0, 10);
+const initialStages = STAGES.filter(([stage]) => TARGET_PHASES.INITIAL.includes(stage));
+
+export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }) {
+  const [form, setForm] = useState(() => ({ rfq_number: "", customer: "", project_lead: defaultProjectLead || "", project_name: "", rfq_dated: todayInput(), description: "" }));
+  const [targets, setTargets] = useState({});
+  const [mainParts, setMainParts] = useState([blankMain()]);
+  const [attachments, setAttachments] = useState([]);
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const setField = (patch) => setForm((current) => ({ ...current, ...patch }));
+  const updateMain = (mainIndex, patch) => setMainParts((parts) => parts.map((part, i) => (i === mainIndex ? { ...part, ...patch } : part)));
+  const updateSub = (mainIndex, subIndex, patch) => setMainParts((parts) => parts.map((part, i) => (i === mainIndex
+    ? { ...part, sub_parts: part.sub_parts.map((sub, j) => (j === subIndex ? { ...sub, ...patch } : sub)) }
+    : part)));
+  const removeMain = (mainIndex) => setMainParts((parts) => parts.filter((_, i) => i !== mainIndex));
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
+        ...form,
+        stage_attachments: attachments.length ? { CUSTOMER_RFQ_RECEIVED: attachments } : {},
+        stage_schedule: emptyStageSchedule().map((item) => ({ ...item, target_date: targets[item.stage] || null })),
+        main_parts: mainParts.map((part) => ({
+          ...part,
+          volume_per_annum_nos: Number(part.volume_per_annum_nos),
+          sub_parts: part.sub_parts.filter((sub) => sub.sub_part_no.trim()).map((sub) => ({ ...sub, qty_per_main_part: Number(sub.qty_per_main_part) })),
+        })),
+      };
+      const response = await api.post(ENDPOINTS.RFQ.BASE, payload);
+      onCreated(response.data.rfqItem._id);
+    } catch (e) {
+      setError(errorMessage(e, "Create failed"));
+      setSaving(false);
+    }
+  };
+
+  return <RfqFullPage title="Create New RFQ" subtitle="RFQ details → attachments → initial target dates → part structure" onClose={onClose}>
+    <form onSubmit={submit} className="space-y-3">
+      {error && <Alert>{error}</Alert>}
+
+      <Panel title="1 · RFQ Details">
+        <div className="grid gap-3 md:grid-cols-3">
+          <FormField label="RFQ Number"><TextInput required value={form.rfq_number} onChange={(e) => setField({ rfq_number: e.target.value })} /></FormField>
+          <FormField label="Customer"><TextInput required value={form.customer} onChange={(e) => setField({ customer: e.target.value })} /></FormField>
+          <FormField label="RFQ Date"><TextInput type="date" required value={form.rfq_dated} onChange={(e) => setField({ rfq_dated: e.target.value })} /></FormField>
+          <FormField label="Project Name"><TextInput required value={form.project_name} onChange={(e) => setField({ project_name: e.target.value })} /></FormField>
+          <FormField label="Project Lead"><TextInput required value={form.project_lead} onChange={(e) => setField({ project_lead: e.target.value })} /></FormField>
+        </div>
+        <div className="mt-3"><FormField label="Description"><TextAreaInput required rows={3} value={form.description} onChange={(e) => setField({ description: e.target.value })} /></FormField></div>
+      </Panel>
+
+      <Panel title="2 · Attachments" toolbar={<span className="text-xs text-slate-600">Customer RFQ, drawings, specs (Excel, PDF, Word, text, images or links)</span>}>
+        <AttachmentField items={attachments} onChange={setAttachments} />
+      </Panel>
+
+      <Panel title="3 · Initial Target Dates" toolbar={<span className="text-xs text-slate-600">Later phases ask for their dates when the customer awards / approves</span>}>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          {initialStages.map(([stage, label]) => <FormField key={stage} label={label}>
+            <TextInput type="date" required value={targets[stage] || ""} onChange={(e) => setTargets((current) => ({ ...current, [stage]: e.target.value }))} />
+          </FormField>)}
+        </div>
+      </Panel>
+
+      <Panel title="4 · Part Structure" toolbar={<GhostButton type="button" onClick={() => setMainParts((parts) => [...parts, blankMain()])}><Plus size={14} className="mr-1 inline" />Add Main Part</GhostButton>}>
+        <p className="mb-3 text-xs text-slate-600">One RFQ has many main parts; each main part can have any number of sub parts (optional).</p>
+        <div className="space-y-3">
+          {mainParts.map((part, mainIndex) => <div key={mainIndex} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase text-indigo-600">Main Part {mainIndex + 1}</span>
+              {mainParts.length > 1 && <button type="button" onClick={() => removeMain(mainIndex)} aria-label="Remove main part" className="text-slate-600 hover:text-rose-600"><Trash2 size={15} /></button>}
+            </div>
+            <div className="grid gap-3 md:grid-cols-3">
+              <FormField label="Main Part No"><TextInput required value={part.main_part_no} onChange={(e) => updateMain(mainIndex, { main_part_no: e.target.value })} /></FormField>
+              <FormField label="Annual Volume"><TextInput type="number" min="1" required value={part.volume_per_annum_nos} onChange={(e) => updateMain(mainIndex, { volume_per_annum_nos: e.target.value })} /></FormField>
+              <FormField label="Description"><TextInput value={part.description} onChange={(e) => updateMain(mainIndex, { description: e.target.value })} /></FormField>
+            </div>
+
+            <div className="space-y-2 border-t border-slate-200 pt-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase text-slate-600">Sub Parts ({part.sub_parts.length})</span>
+                <button type="button" onClick={() => updateMain(mainIndex, { sub_parts: [...part.sub_parts, blankSub()] })} className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600"><Plus size={13} /> Add Sub Part</button>
+              </div>
+              {part.sub_parts.map((sub, subIndex) => <div key={subIndex} className="grid items-end gap-2 md:grid-cols-[1fr_1fr_90px_28px]">
+                <FormField label="Sub Part No"><TextInput value={sub.sub_part_no} onChange={(e) => updateSub(mainIndex, subIndex, { sub_part_no: e.target.value })} /></FormField>
+                <FormField label="Description"><TextInput value={sub.description} onChange={(e) => updateSub(mainIndex, subIndex, { description: e.target.value })} /></FormField>
+                <FormField label="Qty"><TextInput type="number" min="1" value={sub.qty_per_main_part} onChange={(e) => updateSub(mainIndex, subIndex, { qty_per_main_part: e.target.value })} /></FormField>
+                <button type="button" onClick={() => updateMain(mainIndex, { sub_parts: part.sub_parts.filter((_, j) => j !== subIndex) })} aria-label="Remove sub part" className="mb-2 text-slate-600 hover:text-rose-600"><Trash2 size={15} /></button>
+              </div>)}
+            </div>
+          </div>)}
+        </div>
+      </Panel>
+
+      <div className="sticky bottom-0 -mx-3 -mb-3 flex justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3">
+        <GhostButton type="button" onClick={onClose}>Cancel</GhostButton>
+        <PrimaryButton type="submit" disabled={saving}>{saving ? "Creating..." : "Create RFQ"}</PrimaryButton>
+      </div>
+    </form>
+  </RfqFullPage>;
+}

@@ -1,0 +1,10 @@
+import express from "express";
+import { addProject,getAllProjects,getProjectById,editProject,deleteProject } from "../controllers/projectController.js";
+import { authorizeModule } from "../../../middleware/rbacMiddleware.js";
+import { ROLES } from "../../../constants/roles.js";
+const router=express.Router();
+router.post("/", authorizeModule(ROLES.NPD_MANAGER), addProject);
+router.get("/", getAllProjects); router.get("/:projectID",getProjectById);
+router.put("/:projectID",authorizeModule(ROLES.NPD_MANAGER,ROLES.SCM_MANAGER,ROLES.PRODUCTION_MANAGER,ROLES.WAREHOUSE_MANAGER,ROLES.DISPATCH_MANAGER),editProject);
+router.delete("/:projectID",authorizeModule(),deleteProject);
+export default router;

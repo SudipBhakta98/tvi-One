@@ -1,0 +1,10 @@
+import express from "express";
+import { createUser, listUsers, updateUser, listSessions, revokeSession, listAuditLogs } from "./adminController.js";
+const router = express.Router();
+router.post("/users", createUser);
+router.get("/users", listUsers);
+router.patch("/users/:userId", updateUser);
+router.get("/sessions", listSessions);
+router.delete("/sessions/:sessionId", revokeSession);
+router.get("/logs", listAuditLogs);
+export default router;

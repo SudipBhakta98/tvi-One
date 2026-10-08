@@ -1,0 +1,1 @@
+import express from "express";import {addGRN,getProjectGRNs,getRfqGRNs,getAllGRNs,inspectGRN} from "../controllers/warehouseController.js";const r=express.Router();r.get("/",getAllGRNs);r.post("/",addGRN);r.get("/project/:projectID",getProjectGRNs);r.get("/rfq/:rfqItemID",getRfqGRNs);r.patch("/:grnID/inspection",inspectGRN);export default r;

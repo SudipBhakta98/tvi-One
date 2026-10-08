@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #F8FAFC; color: #334155; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+html { font-size: 14px; }
+body { min-width: 1024px; }
+button, a, input, select, textarea { transition: border-color .15s ease, background-color .15s ease, color .15s ease, opacity .15s ease; }
+button:active:not(:disabled), a:active { transform: translateY(1px); }
+:focus-visible { outline: none; }
+* { scrollbar-width: thin; scrollbar-color: #CBD5E1 transparent; }

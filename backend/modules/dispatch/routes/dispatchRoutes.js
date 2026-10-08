@@ -1,0 +1,1 @@
+import express from "express";import {addDispatchEntry,getProjectDispatches,getAllDispatches} from "../controllers/dispatchController.js";const r=express.Router();r.get("/",getAllDispatches);r.post("/",addDispatchEntry);r.get("/project/:projectID",getProjectDispatches);export default r;

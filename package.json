@@ -1,0 +1,19 @@
+{
+  "name": "tvi-one",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "install:all": "npm install",
+    "dev": "npm run dev --workspace backend & npm run dev --workspace frontend",
+    "build": "npm run build --workspace frontend",
+    "start": "npm run start --workspace backend",
+    "seed:admin": "npm run seed:admin --workspace backend"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
