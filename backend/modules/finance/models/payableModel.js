@@ -44,6 +44,19 @@ const payableSchema = new mongoose.Schema(
       min: 0,
     },
 
+    // Optional untaxed extra charge, added directly to totalAmount
+    otherAmount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+
+    otherAmountDescription: {
+      type: String,
+      default: "",
+      trim: true,
+    },
+
     totalAmount: {
       type: Number,
       required: true,

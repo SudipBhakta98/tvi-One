@@ -8,40 +8,89 @@ export const deleteReceivable = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid receivable ID." });
+    // 1. Validate Receivable ID
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide receivable ID.",
+      });
     }
 
-    let summary = null;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid receivable ID.",
+      });
+    }
 
-    await session.withTransaction(async () => {
-      const receivable = await Receivable.findById(id).session(session);
-      if (!receivable) throw new Error("RECEIVABLE_NOT_FOUND");
+    // 2. Start transaction
+    session.startTransaction();
 
-      const { invoiceNumber, grnNumber } = receivable;
-      const collectionDelete = await Collection.deleteMany({ invoiceNumber, grnNumber }, { session });
-      await Receivable.findByIdAndDelete(id, { session });
+    // 3. Find Receivable by ID
+    const receivableToDelete = await Receivable.findById(id).session(session);
 
-      summary = {
-        deletedReceivableId: id,
-        invoiceNumber,
-        grnNumber,
-        deletedCollectionsCount: collectionDelete.deletedCount || 0,
-      };
+    if (!receivableToDelete) {
+      await session.abortTransaction();
+
+      return res.status(404).json({
+        success: false,
+        message: "Receivable record not found.",
+      });
+    }
+
+    // 4. Get invoiceNumber and grnNumber
+    const { invoiceNumber, grnNumber } = receivableToDelete;
+
+    const compositeFilter = {
+      invoiceNumber,
+      grnNumber,
+    };
+
+    // 5. Delete associated Collections
+    const collectionDeleteResult = await Collection.deleteMany(
+      compositeFilter,
+      { session }
+    );
+
+    // 6. Delete Receivable
+    const deletedReceivable = await Receivable.findByIdAndDelete(id, {
+      session,
     });
 
+    // Safety check
+    if (!deletedReceivable) {
+      throw new Error("Receivable could not be deleted.");
+    }
+
+    // 7. Commit transaction
+    await session.commitTransaction();
+
+    // 8. Response
     return res.status(200).json({
       success: true,
-      message: "Receivable and all associated collections deleted successfully.",
-      summary,
+      message:
+        "Receivable and all associated collections deleted successfully.",
+      summary: {
+        deletedReceivableId: deletedReceivable._id,
+        invoiceNumber,
+        grnNumber,
+        deletedCollectionsCount: collectionDeleteResult.deletedCount || 0,
+      },
     });
   } catch (error) {
-    if (error.message === "RECEIVABLE_NOT_FOUND") {
-      return res.status(404).json({ success: false, message: "Receivable record not found." });
+    // Rollback everything if anything fails
+    if (session.inTransaction()) {
+      await session.abortTransaction();
     }
+
     console.error("Error deleting receivable:", error);
-    return res.status(500).json({ success: false, message: error.message || "Internal Server Error" });
+
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Internal Server Error",
+    });
   } finally {
+    // Always close session
     await session.endSession();
   }
 };

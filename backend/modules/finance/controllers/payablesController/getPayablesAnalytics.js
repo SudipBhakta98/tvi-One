@@ -195,6 +195,8 @@ export const getPayablesAnalytics = async (req, res) => {
         gstRate: invoice.gstRate,
         gstAmount: invoice.gstAmount,
         tdsRate: invoice.tdsRate,
+        otherAmount:invoice.otherAmount,
+        otherAmountDescription:invoice.otherAmountDescription,
         tdsAmount: invoice.tdsAmount,
         totalAmount: invoice.totalAmount,
         grossPayableAmount: grossPayable,

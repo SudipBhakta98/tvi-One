@@ -22,22 +22,13 @@ const STATUS_OPTIONS = [
   { value: "uncollected", label: "Uncollected" },
 ];
 
-// API row (camelCase) -> row used by the page and dialogs (adds snake_case aliases).
+// API row (camelCase, used as is) -> row used by the page: only trims / defaults what can be missing.
 const normalizeInvoice = (item) => ({
   ...item,
   _id: item._id || item.id || null,
-  invoice_number: item.invoiceNumber ?? "",
-  grn_number: item.grnNumber ?? "",
-  customer_name: (item.customerName ?? "").trim(),
-  invoice_date: item.invoiceDate ?? null,
-  sub_total: Number(item.subTotal ?? 0),
-  gst_amount: Number(item.gstAmount ?? 0),
-  total_amount: Number(item.totalAmount ?? 0),
-  collected_amount: Number(item.collectedAmount ?? 0),
-  tds_amount: Number(item.tdsAmount ?? 0),
+  customerName: (item.customerName ?? "").trim(),
   outstanding: Number(item.outstanding || 0),
   status: item.status || "uncollected",
-  due_days: item.dueDays ?? null,
 });
 
 const percentOf = (part, whole) => (whole > 0 ? ((part / whole) * 100).toFixed(PERCENT_DECIMALS) : 0);
@@ -118,13 +109,13 @@ export default function ReceivablesPage() {
 
   // Filters
   const customerOptions = useMemo(
-    () => [...new Set(baseInvoicesList.map((i) => i.customer_name).filter(Boolean))].sort().map((name) => ({ value: name, label: name })),
+    () => [...new Set(baseInvoicesList.map((i) => i.customerName).filter(Boolean))].sort().map((name) => ({ value: name, label: name })),
     [baseInvoicesList],
   );
   const monthOptions = useMemo(() => {
     const monthMap = new Map();
     baseInvoicesList.forEach((invoice) => {
-      const parsed = parseDateString(invoice.invoice_date);
+      const parsed = parseDateString(invoice.invoiceDate);
       if (parsed) monthMap.set(parsed.key, parsed.label);
     });
     return [...monthMap.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => b.value.localeCompare(a.value));
@@ -137,9 +128,9 @@ export default function ReceivablesPage() {
   const filteredInvoices = useMemo(
     () =>
       baseInvoicesList.filter((invoice) => {
-        const month = parseDateString(invoice.invoice_date);
+        const month = parseDateString(invoice.invoiceDate);
         return (
-          customerFilter.matches(invoice.customer_name) &&
+          customerFilter.matches(invoice.customerName) &&
           statusFilter.matches(String(invoice.status).toLowerCase()) &&
           monthFilter.matches(month?.key)
         );
@@ -150,14 +141,14 @@ export default function ReceivablesPage() {
   const metrics = useMemo(() => {
     const groups = {};
     filteredInvoices.forEach((invoice) => {
-      const groupKey = invoice.customer_name || "Uncategorized";
+      const groupKey = invoice.customerName || "Uncategorized";
       (groups[groupKey] ||= []).push(invoice);
     });
 
     return {
-      totalReceivable: sumOf(filteredInvoices, "total_amount"),
-      totalCollection: sumOf(filteredInvoices, "collected_amount"),
-      totalTds: sumOf(filteredInvoices, "tds_amount"),
+      totalReceivable: sumOf(filteredInvoices, "totalAmount"),
+      totalCollection: sumOf(filteredInvoices, "collectedAmount"),
+      totalTds: sumOf(filteredInvoices, "tdsAmount"),
       totalOutstanding: sumOf(filteredInvoices, "outstanding"),
       collectedCount: countOf(filteredInvoices, "collected"),
       partialCount: countOf(filteredInvoices, "partial"),
@@ -279,23 +270,23 @@ export default function ReceivablesPage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {Object.entries(metrics.groups).flatMap(([customerName, groupInvoices]) => {
-                  const groupTotal = sumOf(groupInvoices, "total_amount");
-                  const groupCollected = sumOf(groupInvoices, "collected_amount");
-                  const groupTds = sumOf(groupInvoices, "tds_amount");
+                  const groupTotal = sumOf(groupInvoices, "totalAmount");
+                  const groupCollected = sumOf(groupInvoices, "collectedAmount");
+                  const groupTds = sumOf(groupInvoices, "tdsAmount");
                   const groupOutstanding = sumOf(groupInvoices, "outstanding");
 
                   const invoiceRows = groupInvoices.map((invoice) => (
                     <tr
-                      key={invoice._id || `inv-${customerName}-${invoice.invoice_number}-${invoice.grn_number}`}
+                      key={invoice._id || `inv-${customerName}-${invoice.invoiceNumber}-${invoice.grnNumber}`}
                       onClick={() => setActiveInvoiceId(invoice._id)}
                       className="cursor-pointer hover:bg-indigo-50/30 transition-colors group"
                     >
-                      <td className="px-4 py-2.5 font-mono text-slate-600 font-medium group-hover:text-indigo-600">{invoice.invoice_number}</td>
+                      <td className="px-4 py-2.5 font-mono text-slate-600 font-medium group-hover:text-indigo-600">{invoice.invoiceNumber}</td>
                       <td className="px-4 py-2.5 font-semibold text-slate-800">{customerName}</td>
-                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{formatDateString(invoice.invoice_date)}</td>
-                      <td className="px-4 py-2.5 text-right font-medium text-slate-900">{formatCurrency(invoice.total_amount)}</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{formatCurrency(invoice.collected_amount)}</td>
-                      <td className="px-4 py-2.5 text-right font-semibold text-amber-600">{formatCurrency(invoice.tds_amount)}</td>
+                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">{formatDateString(invoice.invoiceDate)}</td>
+                      <td className="px-4 py-2.5 text-right font-medium text-slate-900">{formatCurrency(invoice.totalAmount)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">{formatCurrency(invoice.collectedAmount)}</td>
+                      <td className="px-4 py-2.5 text-right font-semibold text-amber-600">{formatCurrency(invoice.tdsAmount)}</td>
                       <td className={`px-4 py-2.5 text-right font-semibold ${invoice.outstanding > 0 ? "text-rose-600" : "text-slate-400"}`}>
                         {formatCurrency(invoice.outstanding)}
                       </td>
@@ -303,7 +294,7 @@ export default function ReceivablesPage() {
                         <StatusBadge status={invoice.status} />
                       </td>
                       <td className="px-4 py-2.5 text-center whitespace-nowrap">
-                        <DueDaysBadge status={invoice.status} dueDays={invoice.due_days} />
+                        <DueDaysBadge status={invoice.status} dueDays={invoice.dueDays} />
                       </td>
                     </tr>
                   ));

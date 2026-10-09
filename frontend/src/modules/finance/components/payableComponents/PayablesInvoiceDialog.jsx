@@ -8,6 +8,33 @@ import PaymentCard from "../paymentComponets/PaymentCard.jsx";
 import DebitCard from "../debitComponents/DebitCard.jsx";
 import { formatCurrency, formatDisplayDate } from "../../utils/financeFormat.js";
 
+const PERCENT = 100;
+
+// GST % worked back from the stored amounts, so it is right whatever format the rate is stored in.
+const gstPercentOf = (gstAmount, subTotal) =>
+  Number(subTotal) > 0 ? Number(((Number(gstAmount) / Number(subTotal)) * PERCENT).toFixed(4)) : 0;
+
+// Small tile of the "Invoice Breakdown" row. `note` is an optional line under the value.
+const BreakdownTile = ({ label, value, valueClass = "text-slate-900", note }) => (
+  <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200 min-w-0">
+    <span className="text-slate-500 block text-[10px] uppercase font-semibold">{label}</span>
+    <span className={`text-base font-bold ${valueClass}`}>{formatCurrency(value)}</span>
+    {note && (
+      <span className="block text-[10px] text-slate-500 truncate" title={note}>
+        {note}
+      </span>
+    )}
+  </div>
+);
+
+// Tile of the summary row.
+const SummaryTile = ({ label, value, valueClass }) => (
+  <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
+    <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">{label}</div>
+    <div className={`text-lg font-black ${valueClass}`}>{formatCurrency(value)}</div>
+  </div>
+);
+
 function StatusBadge({ status }) {
   const norm = String(status || "").toLowerCase();
   const configMap = {
@@ -86,17 +113,11 @@ export default function PayablesInvoiceDialog({
     try {
       setLoading(true);
       setError(null);
-      const invNum =
-        initialInvoice.invoice_number ?? initialInvoice.invoiceNumber;
-      const grnNum = initialInvoice.grn_number ?? initialInvoice.grnNumber;
-
-      const response = await payablesApi.getDetails(invNum, grnNum);
+      const response = await payablesApi.getDetails(initialInvoice.invoiceNumber, initialInvoice.grnNumber);
       storeDetails(response.data);
 
       // Advance balance of this supplier (does not block the screen if it fails)
-      const supplier = (
-        initialInvoice.supplier_name ?? initialInvoice.supplierName ?? ""
-      ).trim();
+      const supplier = (initialInvoice.supplierName ?? "").trim();
       if (supplier) {
         paymentApi
           .getSupplierAdvanceBalance(supplier)
@@ -121,6 +142,7 @@ export default function PayablesInvoiceDialog({
   useEffect(() => {
     if (!initialInvoice) return;
     let isMounted = true;
+    storeDetails(null); // clear the previous invoice's payments and debits while this one loads
     fetchInvoiceDetails(isMounted);
     return () => {
       isMounted = false;
@@ -186,7 +208,7 @@ export default function PayablesInvoiceDialog({
             <div className="max-w-md w-full bg-white border border-slate-200 p-5 rounded-lg shadow-xl space-y-3 text-center">
               <div className="text-3xl">⚠️</div>
               <h3 className="text-sm font-bold text-slate-900">
-                Delete Invoice #{activeInvoice.invoice_number || activeInvoice.invoiceNumber}?
+                Delete Invoice #{activeInvoice.invoiceNumber}?
               </h3>
               <p className="text-xs text-slate-500">
                 This will permanently delete this payable record along with all associated payments and debit notes.
@@ -240,12 +262,12 @@ export default function PayablesInvoiceDialog({
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 shrink-0 bg-white">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-bold text-slate-900 tracking-tight">
-              Invoice: {activeInvoice.invoice_number || activeInvoice.invoiceNumber || "—"}
+              Invoice: {activeInvoice.invoiceNumber || "—"}
             </h2>
             <StatusBadge status={activeInvoice.status} />
             <DueDaysBadge
               status={activeInvoice.status}
-              dueDays={activeInvoice.due_days || activeInvoice.dueDays}
+              dueDays={activeInvoice.dueDays}
             />
             {loading && (
               <span className="text-xs text-indigo-600 animate-pulse font-semibold">
@@ -282,19 +304,19 @@ export default function PayablesInvoiceDialog({
           <div>
             Supplier:{" "}
             <span className="text-slate-800 font-bold">
-              {activeInvoice.supplier_name || activeInvoice.supplierName || "—"}
+              {activeInvoice.supplierName || "—"}
             </span>
           </div>
           <div>
             GRN:{" "}
             <span className="text-slate-800 font-bold">
-              {activeInvoice.grn_number ?? activeInvoice.grnNumber ?? "—"}
+              {activeInvoice.grnNumber ?? "—"}
             </span>
           </div>
           <div>
             Date:{" "}
             <span className="text-slate-800 font-bold font-mono">
-              {formatDisplayDate(activeInvoice.invoice_date || activeInvoice.invoiceDate)}
+              {formatDisplayDate(activeInvoice.invoiceDate)}
             </span>
           </div>
         </div>
@@ -379,7 +401,7 @@ export default function PayablesInvoiceDialog({
             <div className="p-3 rounded-lg border-2 border-amber-300 bg-amber-50 flex flex-wrap items-center justify-between gap-2">
               <div className="text-xs">
                 <div className="font-extrabold text-amber-900">
-                  💰 {activeInvoice.supplier_name || activeInvoice.supplierName} has{" "}
+                  💰 {activeInvoice.supplierName} has{" "}
                   {formatCurrency(advanceInfo.totalAvailable)} advance available
                 </div>
                 <div className="font-semibold text-amber-800">
@@ -399,41 +421,28 @@ export default function PayablesInvoiceDialog({
               <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
                 Invoice Breakdown
               </h4>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs">
-                <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200">
-                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Total</span>
-                  <span className="text-base font-bold text-slate-900">
-                    {formatCurrency(activeInvoice.total_amount ?? activeInvoice.totalAmount)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200">
-                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Sub Total</span>
-                  <span className="text-base font-bold text-slate-900">
-                    {formatCurrency(activeInvoice.sub_total ?? activeInvoice.subTotal)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200">
-                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">
-                    GST ({Number(activeInvoice.gst_rate ?? activeInvoice.gstRate ?? 0)}%)
-                  </span>
-                  <span className="text-base font-bold text-slate-900">
-                    {formatCurrency(activeInvoice.gst_amount ?? activeInvoice.gstAmount)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200">
-                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">Debit Note</span>
-                  <span className="text-base font-bold text-rose-600">
-                    {formatCurrency(activeInvoice.debit_amount ?? activeInvoice.debitAmount)}
-                  </span>
-                </div>
-                <div className="bg-slate-50 p-2.5 rounded-md border border-slate-200 col-span-2 sm:col-span-1">
-                  <span className="text-slate-500 block text-[10px] uppercase font-semibold">
-                    TDS ({Number(activeInvoice.tds_rate ?? activeInvoice.tdsRate ?? 0)}%)
-                  </span>
-                  <span className="text-base font-bold text-amber-600">
-                    {formatCurrency(activeInvoice.tds_amount ?? activeInvoice.tdsAmount)}
-                  </span>
-                </div>
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3 text-xs">
+                <BreakdownTile label="Total" value={activeInvoice.totalAmount} />
+                <BreakdownTile label="Sub Total" value={activeInvoice.subTotal} />
+                <BreakdownTile
+                  label={`GST (${gstPercentOf(activeInvoice.gstAmount, activeInvoice.subTotal)}%)`}
+                  value={activeInvoice.gstAmount}
+                />
+                <BreakdownTile
+                  label="Other Amount"
+                  value={activeInvoice.otherAmount ?? 0}
+                  note={activeInvoice.otherAmountDescription}
+                />
+                <BreakdownTile
+                  label="Debit Note"
+                  value={activeInvoice.debitAmount}
+                  valueClass="text-rose-600"
+                />
+                <BreakdownTile
+                  label={`TDS (${Number(activeInvoice.tdsRate ?? 0)}%)`}
+                  value={activeInvoice.tdsAmount}
+                  valueClass="text-amber-600"
+                />
               </div>
             </div>
 
@@ -445,41 +454,20 @@ export default function PayablesInvoiceDialog({
                 Settlement Summary
               </h4>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">Net Payable</div>
-                  <div className="text-lg font-black text-indigo-600">
-                    {formatCurrency(
-                      activeInvoice.actual_payable_amount ??
-                        activeInvoice.actualPayableAmount ??
-                        activeInvoice.payableAmount
-                    )}
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">Settled</div>
-                  <div className="text-lg font-black text-emerald-600">
-                    {formatCurrency(totalPaidAmount)}
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">Pending</div>
-                  <div className="text-lg font-black text-amber-600">
-                    {formatCurrency(totalPendingPaymentAmount)}
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-lg bg-slate-50 border border-slate-200">
-                  <div className="text-[10px] text-slate-500 uppercase font-bold tracking-wider mb-0.5">Outstanding</div>
-                  <div
-                    className={`text-lg font-black ${
-                      outstandingBalance > 0 ? "text-rose-600" : "text-slate-400"
-                    }`}
-                  >
-                    {formatCurrency(activeInvoice.outstanding)}
-                  </div>
-                </div>
+                <SummaryTile
+                  label="Net Payable"
+                  value={
+                    activeInvoice.actualPayableAmount ?? activeInvoice.payableAmount
+                  }
+                  valueClass="text-indigo-600"
+                />
+                <SummaryTile label="Settled" value={totalPaidAmount} valueClass="text-emerald-600" />
+                <SummaryTile label="Pending" value={totalPendingPaymentAmount} valueClass="text-amber-600" />
+                <SummaryTile
+                  label="Outstanding"
+                  value={activeInvoice.outstanding}
+                  valueClass={outstandingBalance > 0 ? "text-rose-600" : "text-slate-400"}
+                />
               </div>
             </div>
           </div>

@@ -13,14 +13,36 @@ const initialFormState = {
   subTotal: "",
   gstRate: "18", // percent, as typed by the user
   tdsRate: "0", // percent, as typed by the user
+  otherAmount: "0", // optional, 0 when not added
+  otherAmountDescription: "",
 };
 
-const formatMoney = (value) => `₹${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
+const TEXT_FIELDS = [
+  ["invoiceNumber", "Invoice Number *", "INV-2026-001"],
+  ["grnNumber", "GRN Number *", "GRN-9942"],
+  ["supplierName", "Supplier Name *", "ABC Industries"],
+  ["invoiceDate", "Invoice Date *", ""],
+];
 
-const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+const DECIMAL_FIELDS = [
+  ["subTotal", "Sub Total (₹) *"],
+  ["gstRate", "GST Rate (%) *"],
+  ["tdsRate", "TDS Rate (%) *"],
+  ["otherAmount", "Other Amount (₹)"],
+];
+
+const RATE_FIELDS = ["gstRate", "tdsRate"];
+const INPUT_CLASS =
+  "w-full rounded-lg border border-slate-300 px-4 py-3 text-base font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100";
+
+const PERCENT = 100;
+
+const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * PERCENT) / PERCENT;
 
 // Form percent (18) -> fraction (0.18) that the backend expects.
-const percentToFraction = (percent) => Number((Number(percent || 0) / 100).toFixed(6));
+const percentToFraction = (percent) => Number((Number(percent || 0) / PERCENT).toFixed(6));
+
+const formatMoney = (value) => `₹${Math.round(Number(value) || 0).toLocaleString("en-IN")}`;
 
 export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
   const toast = useToast();
@@ -40,13 +62,14 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
   }, [isOpen]);
 
   // Derived values: always in sync, no effect needed.
+  // Total = Sub Total + GST (on sub total only) + Other Amount (untaxed)
   const { gstAmount, totalAmount } = useMemo(() => {
     const sub = parseFloat(formData.subTotal);
-    const gst = parseFloat(formData.gstRate);
     if (Number.isNaN(sub) || sub < 0) return { gstAmount: 0, totalAmount: "" };
-    const gstAmt = round2(sub * ((Number.isNaN(gst) ? 0 : gst) / 100));
-    return { gstAmount: gstAmt, totalAmount: round2(sub + gstAmt).toFixed(2) };
-  }, [formData.subTotal, formData.gstRate]);
+    const gstAmt = round2(sub * ((parseFloat(formData.gstRate) || 0) / PERCENT));
+    const total = round2(sub + gstAmt + (parseFloat(formData.otherAmount) || 0));
+    return { gstAmount: gstAmt, totalAmount: total.toFixed(2) };
+  }, [formData.subTotal, formData.gstRate, formData.otherAmount]);
 
   if (!isOpen) return null;
 
@@ -78,7 +101,7 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
     const { name, value } = event.target;
     if (value === "") return setFormData((prev) => ({ ...prev, [name]: "" }));
     if (!/^\d*\.?\d{0,2}$/.test(value)) return;
-    if (["gstRate", "tdsRate"].includes(name) && Number(value) > 100) return;
+    if (RATE_FIELDS.includes(name) && Number(value) > PERCENT) return;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
 
@@ -96,7 +119,7 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
     }
     if (formData.gstRate === "") return setErrorData({ message: "GST Rate is required." });
     if (formData.tdsRate === "") return setErrorData({ message: "TDS Rate is required (enter 0 if none)." });
-    if (Number(formData.gstRate) > 100 || Number(formData.tdsRate) > 100) {
+    if (Number(formData.gstRate) > PERCENT || Number(formData.tdsRate) > PERCENT) {
       return setErrorData({ message: "GST and TDS rates cannot exceed 100%." });
     }
 
@@ -110,6 +133,8 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
         invoiceDate: formData.invoiceDate,
         subTotal: Number(formData.subTotal),
         gstRate: percentToFraction(formData.gstRate),
+        otherAmount: Number(formData.otherAmount || 0),
+        otherAmountDescription: formData.otherAmountDescription.trim(),
         totalAmount: Number(totalAmount),
         tdsRate: percentToFraction(formData.tdsRate),
       });
@@ -192,12 +217,7 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
 
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {[
-                  ["invoiceNumber", "Invoice Number *", "INV-2026-001"],
-                  ["grnNumber", "GRN Number *", "GRN-9942"],
-                  ["supplierName", "Supplier Name *", "ABC Industries"],
-                  ["invoiceDate", "Invoice Date *", ""],
-                ].map(([name, label, placeholder]) => (
+                {TEXT_FIELDS.map(([name, label, placeholder]) => (
                   <label key={name} className="block">
                     <span className="block text-sm font-black text-slate-800 mb-2">{label}</span>
                     <input
@@ -206,34 +226,35 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
                       value={formData[name]}
                       onChange={handleChange}
                       placeholder={placeholder}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                      className={`${INPUT_CLASS} bg-white`}
                       required
                     />
                   </label>
                 ))}
-                <label className="block">
-                  <span className="block text-sm font-black text-slate-800 mb-2">Sub Total (₹) *</span>
+                {DECIMAL_FIELDS.map(([name, label]) => (
+                  <label key={name} className="block">
+                    <span className="block text-sm font-black text-slate-800 mb-2">{label}</span>
+                    <input
+                      name={name}
+                      value={formData[name]}
+                      onChange={handleDecimalChange}
+                      inputMode="decimal"
+                      className={`${INPUT_CLASS} font-mono`}
+                      required={label.endsWith("*")}
+                    />
+                  </label>
+                ))}
+                <label className="block md:col-span-2">
+                  <span className="block text-sm font-black text-slate-800 mb-2">Other Amount Description</span>
                   <input
-                    name="subTotal"
-                    value={formData.subTotal}
-                    onChange={handleDecimalChange}
-                    inputMode="decimal"
-                    className="w-full rounded-lg border border-slate-300 px-4 py-3 text-base font-semibold font-mono text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                    required
+                    name="otherAmountDescription"
+                    value={formData.otherAmountDescription}
+                    onChange={handleChange}
+                    placeholder="e.g. Freight charges"
+                    className={`${INPUT_CLASS} bg-white`}
                   />
                 </label>
-                <label className="block">
-                  <span className="block text-sm font-black text-slate-800 mb-2">GST Rate (%) *</span>
-                  <input
-                    name="gstRate"
-                    value={formData.gstRate}
-                    onChange={handleDecimalChange}
-                    inputMode="decimal"
-                    className="w-full rounded-lg border border-slate-300 px-4 py-3 text-base font-semibold font-mono text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                    required
-                  />
-                </label>
-                <label className="block">
+                <label className="block md:col-span-2">
                   <span className="block text-sm font-black text-slate-800 mb-2">Total Amount (₹)</span>
                   <input
                     name="totalAmount"
@@ -242,22 +263,11 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
                     className="w-full rounded-lg border border-slate-200 bg-slate-100 px-4 py-3 text-base font-black font-mono text-slate-900"
                   />
                 </label>
-                <label className="block">
-                  <span className="block text-sm font-black text-slate-800 mb-2">TDS Rate (%) *</span>
-                  <input
-                    name="tdsRate"
-                    value={formData.tdsRate}
-                    onChange={handleDecimalChange}
-                    inputMode="decimal"
-                    className="w-full rounded-lg border border-slate-300 px-4 py-3 text-base font-semibold font-mono text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-                    required
-                  />
-                </label>
               </div>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
                 <div className="text-sm font-black text-slate-900">Calculated invoice summary</div>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-4">
                   <div>
                     <div className="text-xs font-bold text-slate-500">Sub Total</div>
                     <div className="text-lg font-black text-slate-900 mt-1">{formatMoney(formData.subTotal)}</div>
@@ -265,6 +275,10 @@ export default function AddPayableDialog({ isOpen, onClose, onSuccess }) {
                   <div>
                     <div className="text-xs font-bold text-slate-500">GST</div>
                     <div className="text-lg font-black text-slate-900 mt-1">{formatMoney(gstAmount)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-slate-500">Other Amount</div>
+                    <div className="text-lg font-black text-slate-900 mt-1">{formatMoney(formData.otherAmount)}</div>
                   </div>
                   <div>
                     <div className="text-xs font-bold text-slate-500">Total</div>

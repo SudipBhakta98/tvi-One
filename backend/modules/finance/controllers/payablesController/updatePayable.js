@@ -1,6 +1,8 @@
 import Payable from "../../models/payableModel.js";
 import mongoose from "mongoose";
 
+const PERCENT = 100;
+
 export const updatePayable = async (req, res) => {
   try {
     const { id } = req.params;
@@ -49,9 +51,10 @@ export const updatePayable = async (req, res) => {
       updateData.subTotal !== undefined
         ? Number(updateData.subTotal)
         : existingPayable.subTotal;
+    // The form sends the GST rate as a percent (18); it is stored as a fraction (0.18), same as create.
     const gstRate =
       updateData.gstRate !== undefined
-        ? Number(updateData.gstRate)
+        ? Number(updateData.gstRate) / PERCENT
         : existingPayable.gstRate;
     const totalAmount =
       updateData.totalAmount !== undefined
@@ -62,16 +65,36 @@ export const updatePayable = async (req, res) => {
         ? Number(updateData.tdsRate)
         : existingPayable.tdsRate;
 
+    if (!Number.isFinite(gstRate) || gstRate < 0 || gstRate > 1) {
+      return res.status(400).json({
+        success: false,
+        message: "GST Rate must be between 0% and 100%.",
+      });
+    }
+
+    // Other amount: keep the stored value unless the request sends one (blank = 0)
+    const otherAmount = Number(updateData.otherAmount ?? existingPayable.otherAmount) || 0;
+    const otherAmountDescription = String(
+      updateData.otherAmountDescription ?? existingPayable.otherAmountDescription ?? "",
+    ).trim();
+
+    if (otherAmount < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Other amount cannot be negative.",
+      });
+    }
+
     // Math Validation
     const expectedGstAmount =
-      Math.round(subTotal * (gstRate / 100) * 100) / 100;
+      Math.round(subTotal * gstRate * 100) / 100;
     const expectedTotalAmount =
-      Math.round((subTotal + expectedGstAmount) * 100) / 100;
+      Math.round((subTotal + expectedGstAmount + otherAmount) * 100) / 100;
 
     if (Math.abs(totalAmount - expectedTotalAmount) > 0.01) {
       return res.status(400).json({
         success: false,
-        message: `Math Mismatch Error: SubTotal (${subTotal}) + GST (${expectedGstAmount}) = ${expectedTotalAmount}, but Total Amount provided is ${totalAmount}.`,
+        message: `Math Mismatch Error: SubTotal (${subTotal}) + GST (${expectedGstAmount}) + Other Amount (${otherAmount}) = ${expectedTotalAmount}, but Total Amount provided is ${totalAmount}.`,
       });
     }
 
@@ -93,6 +116,8 @@ export const updatePayable = async (req, res) => {
     existingPayable.subTotal = subTotal;
     existingPayable.gstRate = gstRate;
     existingPayable.gstAmount = expectedGstAmount;
+    existingPayable.otherAmount = otherAmount;
+    existingPayable.otherAmountDescription = otherAmountDescription;
     existingPayable.totalAmount = expectedTotalAmount;
     existingPayable.tdsRate = tdsRate;
     existingPayable.tdsAmount = calculatedTdsAmount;

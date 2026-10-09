@@ -110,6 +110,10 @@ export const createPayable = async (req, res) => {
         tdsRate = Math.round(tdsRate * 100 * 10000) / 10000; // fraction -> percent, 4 decimals
       }
 
+      // Optional: blank counts as 0, negative is rejected
+      const otherAmount = Number(item.otherAmount) || 0;
+      const otherAmountDescription = String(item.otherAmountDescription ?? "").trim();
+
       const totalAmount = Number(item.totalAmount);
 
       // Basic validations
@@ -124,6 +128,7 @@ export const createPayable = async (req, res) => {
       if (isNaN(tdsRate) || tdsRate < 0 || tdsRate > 100) {
         errors.push("TDS rate must be between 0% and 100%.");
       }
+      if (otherAmount < 0) errors.push("Other amount cannot be negative.");
       if (isNaN(totalAmount) || totalAmount < 0) errors.push("Total amount must be a valid amount.");
 
       // Duplicate check
@@ -145,12 +150,12 @@ export const createPayable = async (req, res) => {
         gstAmount = round2(subTotal * gstRate);
       }
 
-      // Total amount check
+      // Total amount check: Sub-total + GST + Other amount (other amount is not taxed)
       if (!isNaN(subTotal) && !isNaN(gstRate) && !isNaN(totalAmount)) {
-        const expectedTotalAmount = round2(subTotal + gstAmount);
+        const expectedTotalAmount = round2(subTotal + gstAmount + otherAmount);
 
         if (Math.abs(totalAmount - expectedTotalAmount) > TOTAL_TOLERANCE) {
-          errors.push(`Total amount (₹${totalAmount}) does not match Sub-total + GST calculation (₹${expectedTotalAmount}).`);
+          errors.push(`Total amount (₹${totalAmount}) does not match Sub-total + GST + Other amount calculation (₹${expectedTotalAmount}).`);
         }
       }
 
@@ -178,6 +183,8 @@ export const createPayable = async (req, res) => {
         subTotal,
         gstRate,
         gstAmount,
+        otherAmount,
+        otherAmountDescription,
         totalAmount,
         tdsRate,
         tdsAmount,

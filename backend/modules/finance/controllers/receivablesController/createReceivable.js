@@ -22,29 +22,20 @@ const parseFlexibleDate = (rawDate) => {
 
   if (typeof rawDate === "string") {
     const parts = rawDate.split(/[-/]/);
-
     if (parts.length === 3) {
       const [day, month, year] = parts.map(Number);
-
       if (day && month && year) {
         d = new Date(year, month - 1, day);
-
-        if (!isNaN(d.getTime())) {
-          return d;
-        }
+        if (!isNaN(d.getTime())) return d;
       }
     }
   }
 
   // Excel serial date
   const numericDate = Number(rawDate);
-
   if (!isNaN(numericDate) && numericDate > 20000) {
     d = new Date(Math.round((numericDate - 25569) * 86400 * 1000));
-
-    if (!isNaN(d.getTime())) {
-      return d;
-    }
+    if (!isNaN(d.getTime())) return d;
   }
 
   return null;
@@ -54,18 +45,12 @@ export const createReceivable = async (req, res) => {
   try {
     let payload = req.body;
 
-    // Support:
-    // { invoices: [...] }
-    // OR
-    // [...]
-    // OR
-    // { invoiceNumber: "...", ... }
+    // Supports { invoices: [...] }, [...] or a single invoice object
     if (payload && Array.isArray(payload.invoices)) {
       payload = payload.invoices;
     }
 
     const isBulk = Array.isArray(payload);
-
     const itemsToProcess = isBulk ? payload : payload ? [payload] : [];
 
     if (itemsToProcess.length === 0) {
@@ -84,10 +69,6 @@ export const createReceivable = async (req, res) => {
       });
     }
 
-    // ---------------------------------------------------------
-    // Existing invoice check
-    // ---------------------------------------------------------
-
     const existingRecords = await Receivable.find(
       {},
       { invoiceNumber: 1, grnNumber: 1, _id: 0 }
@@ -100,10 +81,6 @@ export const createReceivable = async (req, res) => {
     const validDocuments = [];
     const invalidItems = [];
     const seenInBatch = new Set();
-
-    // ---------------------------------------------------------
-    // Validate every invoice
-    // ---------------------------------------------------------
 
     itemsToProcess.forEach((item, index) => {
       const itemIndex = index + 1;
@@ -129,69 +106,49 @@ export const createReceivable = async (req, res) => {
       // Always a fraction here, e.g. 0.18 (works for both 18 and 0.18 input)
       const gstRate = normalizeGstRate(item.gstRate);
 
+      // Optional: blank counts as 0, negative is rejected
+      const otherAmount = Number(item.otherAmount) || 0;
+      const otherAmountDescription = String(item.otherAmountDescription ?? "").trim();
+
       const totalAmount = Number(item.totalAmount);
 
-      // -------------------------------------------------------
       // Basic validations
-      // -------------------------------------------------------
-
       if (!invoiceNumber) errors.push("Invoice number is required.");
       if (!grnNumber) errors.push("GRN number is required.");
       if (!customerName) errors.push("Customer name is required.");
       if (!parsedInvoiceDate) errors.push("Please provide a valid invoice date.");
       if (isNaN(subTotal) || subTotal < 0) errors.push("Sub-total must be a valid amount.");
-      if (isNaN(gstRate) || gstRate < 0 ) {
-        errors.push("GST rate can't be less than 0.");
-      }
+      if (isNaN(gstRate) || gstRate < 0) errors.push("GST rate can't be less than 0.");
+      if (otherAmount < 0) errors.push("Other amount cannot be negative.");
       if (isNaN(totalAmount) || totalAmount < 0) errors.push("Total amount must be a valid amount.");
 
-      // -------------------------------------------------------
       // Duplicate check
-      // -------------------------------------------------------
-
       if (invoiceNumber && grnNumber) {
         const compositeKey = `${invoiceNumber}_${grnNumber}`;
 
         if (existingSet.has(compositeKey)) {
-          errors.push(
-            `An invoice with Invoice Number '${invoiceNumber}' and GRN Number '${grnNumber}' already exists.`
-          );
+          errors.push(`An invoice with Invoice Number '${invoiceNumber}' and GRN Number '${grnNumber}' already exists.`);
         } else if (seenInBatch.has(compositeKey)) {
-          errors.push(
-            `Invoice Number '${invoiceNumber}' and GRN Number '${grnNumber}' are repeated in this request.`
-          );
+          errors.push(`Invoice Number '${invoiceNumber}' and GRN Number '${grnNumber}' are repeated in this request.`);
         } else {
           seenInBatch.add(compositeKey);
         }
       }
 
-      // -------------------------------------------------------
-      // GST calculation (fraction rate, so NO "/ 100" here)
-      // -------------------------------------------------------
-
+      // GST calculation (fraction rate, keeps paise)
       let gstAmount = 0;
-
       if (!isNaN(subTotal) && !isNaN(gstRate)) {
         gstAmount = round2(subTotal * gstRate);
       }
 
-      // -------------------------------------------------------
-      // Total amount validation
-      // -------------------------------------------------------
-
+      // Total amount check: Sub-total + GST + Other amount (other amount is not taxed)
       if (!isNaN(subTotal) && !isNaN(gstRate) && !isNaN(totalAmount)) {
-        const expectedTotalAmount = round2(subTotal + gstAmount);
+        const expectedTotalAmount = round2(subTotal + gstAmount + otherAmount);
 
         if (Math.abs(totalAmount - expectedTotalAmount) > TOTAL_TOLERANCE) {
-          errors.push(
-            `Total amount (₹${totalAmount}) does not match Sub-total + GST calculation (₹${expectedTotalAmount}).`
-          );
+          errors.push(`Total amount (₹${totalAmount}) does not match Sub-total + GST + Other amount calculation (₹${expectedTotalAmount}).`);
         }
       }
-
-      // -------------------------------------------------------
-      // Invalid invoice
-      // -------------------------------------------------------
 
       if (errors.length > 0) {
         invalidItems.push({
@@ -202,37 +159,25 @@ export const createReceivable = async (req, res) => {
           rawItem: item,
           errors,
         });
-
         return;
       }
-
-      // -------------------------------------------------------
-      // Valid invoice
-      // -------------------------------------------------------
-
-      const receivableAmount = round2(totalAmount);
 
       validDocuments.push({
         invoiceNumber,
         grnNumber,
         customerName,
         invoiceDate: parsedInvoiceDate,
-
         subTotal,
         gstRate,
         gstAmount,
+        otherAmount,
+        otherAmountDescription,
         totalAmount,
-
-        receivableAmount,
-
+        receivableAmount: round2(totalAmount),
         createdBy,
         updateLogs: [],
       });
     });
-
-    // ---------------------------------------------------------
-    // Single invoice
-    // ---------------------------------------------------------
 
     if (!isBulk) {
       if (invalidItems.length > 0) {
@@ -245,7 +190,6 @@ export const createReceivable = async (req, res) => {
       }
 
       const newReceivable = new Receivable(validDocuments[0]);
-
       await newReceivable.save();
 
       return res.status(201).json({
@@ -255,36 +199,25 @@ export const createReceivable = async (req, res) => {
       });
     }
 
-    // ---------------------------------------------------------
-    // Bulk insert
-    // ---------------------------------------------------------
-
     let insertedDocs = [];
-
     if (validDocuments.length > 0) {
-      insertedDocs = await Receivable.insertMany(validDocuments, {
-        ordered: false,
-      });
+      insertedDocs = await Receivable.insertMany(validDocuments, { ordered: false });
     }
 
     return res
       .status(invalidItems.length > 0 && insertedDocs.length === 0 ? 400 : 200)
       .json({
         success: true,
-
         message: `Bulk processing completed. ${insertedDocs.length} invoice(s) created successfully.`,
-
         summary: {
           totalReceived: itemsToProcess.length,
           successfullyInserted: insertedDocs.length,
           failedCount: invalidItems.length,
         },
-
         failedInvoices: invalidItems,
       });
   } catch (error) {
     console.error("Error in createReceivable controller:", error);
-
     return res.status(500).json({
       success: false,
       message: "Something went wrong while creating the receivable invoice.",

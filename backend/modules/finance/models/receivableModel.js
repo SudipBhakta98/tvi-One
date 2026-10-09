@@ -14,6 +14,11 @@ const receivableSchema = new mongoose.Schema(
       max: 100,
     },
     gstAmount: { type: Number, required: true, min: 0 },
+
+    // Optional untaxed extra charge, added directly to totalAmount
+    otherAmount: { type: Number, default: 0, min: 0 },
+    otherAmountDescription: { type: String, default: "", trim: true },
+
     totalAmount: { type: Number, required: true, min: 0 },
 
     createdBy: {

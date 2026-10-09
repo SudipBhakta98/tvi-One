@@ -1,42 +1,54 @@
-import React, { useEffect, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { AlertCircle, Loader2, X } from "lucide-react";
 import { payablesApi } from "../../api.js";
 
+const PERCENT = 100;
+
+const round2 = (value) => Math.round((Number(value) + Number.EPSILON) * PERCENT) / PERCENT;
+
+// GST % worked back from the stored amounts, so it is right whatever format the rate is stored in.
+const gstPercentOf = (gstAmount, subTotal) =>
+  Number(subTotal) > 0 ? Number(((Number(gstAmount) / Number(subTotal)) * PERCENT).toFixed(4)) : 0;
+
+const RATE_FIELDS = ["gstRate", "tdsRate"];
+const EDIT_INPUT_CLASS =
+  "w-full bg-slate-50 border-2 border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-bold outline-none focus:border-indigo-600 focus:bg-white transition shadow-sm";
+
+// Labelled field of the form.
+const EditField = ({ label, labelClass = "text-slate-700", children }) => (
+  <div className="space-y-1">
+    <label className={`block text-[11px] font-bold uppercase tracking-wider ${labelClass}`}>{label}</label>
+    {children}
+  </div>
+);
+
+const MONO_INPUT_CLASS = `${EDIT_INPUT_CLASS} font-mono`;
+
 export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
   const [editForm, setEditForm] = useState({
-    supplierName: invoice?.supplier_name || invoice?.supplierName || "",
-    subTotal: invoice?.sub_total ?? invoice?.subTotal ?? "",
-    gstRate: invoice?.gst_rate ?? invoice?.gstRate ?? "",
-    totalAmount: invoice?.total_amount ?? invoice?.totalAmount ?? "",
-    tdsRate: invoice?.tds_rate ?? invoice?.tdsRate ?? "",
+    supplierName: invoice?.supplierName || "",
+    subTotal: invoice?.subTotal ?? "",
+    gstRate: String(gstPercentOf(invoice?.gstAmount, invoice?.subTotal)),
+    tdsRate: invoice?.tdsRate ?? "",
+    otherAmount: invoice?.otherAmount ?? "0",
+    otherAmountDescription: invoice?.otherAmountDescription ?? "",
     remark: "",
   });
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Calculate total
-  useEffect(() => {
+  // Total = Sub Total + GST + Other Amount, always in sync with the inputs
+  const totalAmount = useMemo(() => {
     const sub = Number(editForm.subTotal);
-    const gst = Number(editForm.gstRate);
-
-    if (!isNaN(sub) && !isNaN(gst) && sub >= 0) {
-      const total = sub + (sub * gst) / 100;
-
-      setEditForm((prev) => ({
-        ...prev,
-        totalAmount: total.toFixed(2),
-      }));
-    }
-  }, [editForm.subTotal, editForm.gstRate]);
+    if (Number.isNaN(sub) || sub < 0) return "";
+    const gstAmount = round2(sub * ((Number(editForm.gstRate) || 0) / PERCENT));
+    return round2(sub + gstAmount + (Number(editForm.otherAmount) || 0)).toFixed(2);
+  }, [editForm.subTotal, editForm.gstRate, editForm.otherAmount]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-
-    setEditForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setEditForm((prev) => ({ ...prev, [name]: value }));
   };
 
   // Decimal input handler
@@ -49,39 +61,32 @@ export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
       .replace(/^(\d+)\.(\d{0,2}).*$/, "$1.$2");
 
     // GST and TDS: 0 - 100
-    if (["gstRate", "tdsRate"].includes(name) && Number(value) > 100) {
-      value = "100";
-    }
+    if (RATE_FIELDS.includes(name) && Number(value) > PERCENT) value = String(PERCENT);
 
-    setEditForm((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
+    setEditForm((prev) => ({ ...prev, [name]: value }));
   };
+
+  const decimalInput = (name, placeholder) => (
+    <input
+      type="text"
+      inputMode="decimal"
+      name={name}
+      value={editForm[name]}
+      onChange={handleDecimalChange}
+      placeholder={placeholder}
+      disabled={loading}
+      className={MONO_INPUT_CLASS}
+    />
+  );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError(null);
 
-    if (!editForm.remark.trim()) {
-      setError("Remark is required for updating this invoice.");
-      return;
-    }
-
-    if (Number(editForm.subTotal) < 0) {
-      setError("Sub Total cannot be negative.");
-      return;
-    }
-
-    if (Number(editForm.gstRate) > 100) {
-      setError("GST Rate cannot be greater than 100%.");
-      return;
-    }
-
-    if (Number(editForm.tdsRate) > 100) {
-      setError("TDS Rate cannot be greater than 100%.");
-      return;
-    }
+    if (!editForm.remark.trim()) return setError("Remark is required for updating this invoice.");
+    if (Number(editForm.subTotal) < 0) return setError("Sub Total cannot be negative.");
+    if (Number(editForm.gstRate) > PERCENT) return setError("GST Rate cannot be greater than 100%.");
+    if (Number(editForm.tdsRate) > PERCENT) return setError("TDS Rate cannot be greater than 100%.");
 
     try {
       setLoading(true);
@@ -92,16 +97,15 @@ export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
         ...editForm,
         subTotal: Number(editForm.subTotal),
         gstRate: Number(editForm.gstRate),
-        totalAmount: Number(editForm.totalAmount),
         tdsRate: Number(editForm.tdsRate),
+        otherAmount: Number(editForm.otherAmount || 0),
+        otherAmountDescription: editForm.otherAmountDescription.trim(),
+        totalAmount: Number(totalAmount),
       };
 
       const res = await payablesApi.update(targetId, payload);
 
-      if (onSuccess) {
-        onSuccess(res.data?.message);
-      }
-
+      onSuccess?.(res.data?.message);
       onClose();
     } catch (err) {
       setError(err.response?.data?.message || "Failed to update record.");
@@ -128,7 +132,7 @@ export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
             <p className="text-[11px] font-semibold text-slate-500">
               Invoice:{" "}
               <span className="font-mono text-slate-800">
-                {invoice?.invoice_number || invoice?.invoiceNumber || "N/A"}
+                {invoice?.invoiceNumber || "N/A"}
               </span>
             </p>
           </div>
@@ -155,95 +159,48 @@ export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
 
           {/* INNER CARD CONTAINER */}
           <div className="p-4 rounded-xl border-2 border-slate-300 bg-white space-y-4 shadow-sm">
-            {/* SUPPLIER + SUBTOTAL */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  Supplier Name
-                </label>
+              <EditField label="Supplier Name">
                 <input
                   type="text"
                   name="supplierName"
                   value={editForm.supplierName}
                   onChange={handleChange}
                   disabled={loading}
-                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-bold outline-none focus:border-indigo-600 focus:bg-white transition shadow-sm"
+                  className={EDIT_INPUT_CLASS}
                 />
-              </div>
+              </EditField>
+              <EditField label="Sub Total (₹)">{decimalInput("subTotal", "0.00")}</EditField>
 
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  Sub Total (₹)
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  name="subTotal"
-                  value={editForm.subTotal}
-                  onChange={handleDecimalChange}
-                  placeholder="0.00"
-                  disabled={loading}
-                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-bold outline-none focus:border-indigo-600 focus:bg-white transition font-mono shadow-sm"
-                />
-              </div>
-            </div>
-
-            {/* GST + TOTAL */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  GST Rate (%)
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  name="gstRate"
-                  value={editForm.gstRate}
-                  onChange={handleDecimalChange}
-                  placeholder="18.00"
-                  disabled={loading}
-                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-bold outline-none focus:border-indigo-600 focus:bg-white transition font-mono shadow-sm"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-emerald-700 uppercase tracking-wider">
-                  Total Amount (₹)
-                </label>
+              <EditField label="GST Rate (%)">{decimalInput("gstRate", "18.00")}</EditField>
+              <EditField label="Total Amount (₹)" labelClass="text-emerald-700">
                 <input
                   type="text"
                   name="totalAmount"
-                  value={editForm.totalAmount}
+                  value={totalAmount}
                   readOnly
                   className="w-full bg-emerald-50/60 border-2 border-emerald-300 rounded-lg px-3.5 py-2 text-xs text-emerald-900 font-extrabold outline-none cursor-not-allowed font-mono shadow-sm"
                 />
-              </div>
+              </EditField>
+
+              <EditField label="TDS Rate (%)">{decimalInput("tdsRate", "0.00")}</EditField>
+              <EditField label="Other Amount (₹)">{decimalInput("otherAmount", "0.00")}</EditField>
             </div>
 
-            {/* TDS RATE */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
-                  TDS Rate (%)
-                </label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  name="tdsRate"
-                  value={editForm.tdsRate}
-                  onChange={handleDecimalChange}
-                  placeholder="0.00"
-                  disabled={loading}
-                  className="w-full bg-slate-50 border-2 border-slate-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-bold outline-none focus:border-indigo-600 focus:bg-white transition font-mono shadow-sm"
-                />
-              </div>
-            </div>
+            <EditField label="Other Amount Description">
+              <input
+                type="text"
+                name="otherAmountDescription"
+                value={editForm.otherAmountDescription}
+                onChange={handleChange}
+                placeholder="e.g. Freight charges"
+                disabled={loading}
+                className={EDIT_INPUT_CLASS}
+              />
+            </EditField>
 
             {/* REMARK */}
-            <div className="space-y-1">
-              <label className="block text-[11px] font-bold text-amber-700 uppercase tracking-wider">
-                Remark <span className="text-rose-600">*</span>
-              </label>
+            <EditField label={<>Remark <span className="text-rose-600">*</span></>} labelClass="text-amber-700">
               <textarea
                 name="remark"
                 value={editForm.remark}
@@ -254,7 +211,7 @@ export default function EditPayableDialog({ invoice, onClose, onSuccess }) {
                 placeholder="Describe the reason for this update..."
                 className="w-full bg-slate-50 border-2 border-amber-300 rounded-lg px-3.5 py-2 text-xs text-slate-900 font-medium placeholder:text-slate-400 placeholder:font-normal outline-none focus:border-amber-500 focus:bg-white transition resize-none shadow-sm"
               />
-            </div>
+            </EditField>
           </div>
 
           {/* ACTION BUTTONS */}

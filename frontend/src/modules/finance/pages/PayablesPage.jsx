@@ -80,28 +80,13 @@ const STATUS_OPTIONS = [
   { value: "unpaid", label: "Unpaid" },
 ];
 
-// API row (camelCase) -> row used by this page and its dialogs (adds the snake_case names the dialogs read).
+// API row (camelCase, used as is) -> row used by this page and its dialogs: only trims / defaults what can be missing.
 const normalizeInvoice = (item) => ({
   ...item,
   _id: item._id || item.id || null,
-  invoice_number: item.invoiceNumber ?? "",
-  grn_number: item.grnNumber ?? "",
-  supplier_name: (item.supplierName ?? "").trim(),
-  invoice_date: item.invoiceDate ?? null,
-  sub_total: Number(item.subTotal ?? 0),
-  gst_rate: Number(item.gstRate ?? 0),
-  gst_amount: Number(item.gstAmount ?? 0),
-  tds_rate: Number(item.tdsRate ?? 0),
-  tds_amount: Number(item.tdsAmount ?? 0),
-  total_amount: Number(item.totalAmount ?? 0),
-  gross_payable_amount: Number(item.grossPayableAmount ?? 0),
-  debit_amount: Number(item.debitAmount ?? 0),
-  actual_payable_amount: Number(item.actualPayableAmount ?? 0),
-  paid_amount: Number(item.paidAmount ?? 0),
+  supplierName: (item.supplierName ?? "").trim(),
   outstanding: Number(item.outstanding || 0),
   status: item.status || "unpaid",
-  due_days: item.dueDays ?? null,
-  is_overdue: item.isOverdue ?? false,
 });
 
 export default function PayablesPage() {
@@ -148,7 +133,7 @@ export default function PayablesPage() {
     const searchTerm = searchInput.trim().toLowerCase();
     if (!searchTerm) return allInvoices;
     return allInvoices.filter((invoice) =>
-      [invoice.invoice_number, invoice.grn_number, invoice.supplier_name].some((field) =>
+      [invoice.invoiceNumber, invoice.grnNumber, invoice.supplierName].some((field) =>
         String(field).toLowerCase().includes(searchTerm),
       ),
     );
@@ -156,14 +141,14 @@ export default function PayablesPage() {
 
   // Filter options come from the rows currently shown
   const supplierOptions = useMemo(
-    () => [...new Set(baseInvoicesList.map((i) => i.supplier_name).filter(Boolean))].sort().map((name) => ({ value: name, label: name })),
+    () => [...new Set(baseInvoicesList.map((i) => i.supplierName).filter(Boolean))].sort().map((name) => ({ value: name, label: name })),
     [baseInvoicesList],
   );
 
   const monthOptions = useMemo(() => {
     const monthMap = new Map();
     baseInvoicesList.forEach((invoice) => {
-      const parsed = parseDateString(invoice.invoice_date);
+      const parsed = parseDateString(invoice.invoiceDate);
       if (parsed) monthMap.set(parsed.key, parsed.label);
     });
     return [...monthMap.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => b.value.localeCompare(a.value));
@@ -176,9 +161,9 @@ export default function PayablesPage() {
   const filteredInvoices = useMemo(
     () =>
       baseInvoicesList.filter((invoice) => {
-        const month = parseDateString(invoice.invoice_date);
+        const month = parseDateString(invoice.invoiceDate);
         return (
-          supplierFilter.matches(invoice.supplier_name) &&
+          supplierFilter.matches(invoice.supplierName) &&
           statusFilter.matches(String(invoice.status).toLowerCase()) &&
           monthFilter.matches(month?.key)
         );
@@ -191,15 +176,15 @@ export default function PayablesPage() {
     const metrics = { totalPayable: 0, totalPaid: 0, paidCount: 0, unpaidCount: 0, partialCount: 0, groups: {} };
 
     filteredInvoices.forEach((invoice) => {
-      metrics.totalPayable += Number(invoice.actual_payable_amount) || 0;
-      metrics.totalPaid += Number(invoice.paid_amount) || 0;
+      metrics.totalPayable += Number(invoice.actualPayableAmount) || 0;
+      metrics.totalPaid += Number(invoice.paidAmount) || 0;
 
       const status = String(invoice.status || "").toLowerCase();
       if (status === "paid") metrics.paidCount++;
       else if (status === "unpaid") metrics.unpaidCount++;
       else if (status === "partial") metrics.partialCount++;
 
-      const groupKey = invoice.supplier_name || "Uncategorized";
+      const groupKey = invoice.supplierName || "Uncategorized";
       (metrics.groups[groupKey] ||= []).push(invoice);
     });
 
@@ -392,11 +377,11 @@ export default function PayablesPage() {
                 {Object.entries(computedMetrics.groups).flatMap(
                   ([supplierName, groupInvoices]) => {
                     const groupPayable = groupInvoices.reduce(
-                      (sum, i) => sum + (i.actual_payable_amount || 0),
+                      (sum, i) => sum + (i.actualPayableAmount || 0),
                       0
                     );
                     const groupPaid = groupInvoices.reduce(
-                      (sum, i) => sum + (i.paid_amount || 0),
+                      (sum, i) => sum + (i.paidAmount || 0),
                       0
                     );
 
@@ -404,7 +389,7 @@ export default function PayablesPage() {
                       const rowKey =
                         invoice._id ||
                         invoice.id ||
-                        `inv-${supplierName}-${invoice.invoice_number}-${idx}`;
+                        `inv-${supplierName}-${invoice.invoiceNumber}-${idx}`;
 
                       return (
                         <tr
@@ -413,19 +398,19 @@ export default function PayablesPage() {
                           className="cursor-pointer hover:bg-indigo-50/30 transition-colors group"
                         >
                           <td className="px-4 py-2.5 font-mono text-slate-600 font-medium group-hover:text-indigo-600">
-                            {invoice.invoice_number}
+                            {invoice.invoiceNumber}
                           </td>
                           <td className="px-4 py-2.5 font-semibold text-slate-800">
                             {supplierName}
                           </td>
                           <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
-                            {formatDateString(invoice.invoice_date)}
+                            {formatDateString(invoice.invoiceDate)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-medium text-slate-900">
-                            {formatCurrency(invoice.actual_payable_amount)}
+                            {formatCurrency(invoice.actualPayableAmount)}
                           </td>
                           <td className="px-4 py-2.5 text-right font-semibold text-emerald-600">
-                            {formatCurrency(invoice.paid_amount)}
+                            {formatCurrency(invoice.paidAmount)}
                           </td>
                           <td
                             className={`px-4 py-2.5 text-right font-semibold ${
@@ -440,7 +425,7 @@ export default function PayablesPage() {
                           <td className="px-4 py-2.5 text-center whitespace-nowrap">
                             <DueDaysBadge
                               status={invoice.status}
-                              dueDays={invoice.due_days}
+                              dueDays={invoice.dueDays}
                             />
                           </td>
                         </tr>

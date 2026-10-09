@@ -9,7 +9,9 @@ export const BULK_RECEIVABLE_COLUMN_GUIDE = [
   { key: "invoiceDate", label: "Invoice Date", required: true, example: "31/08/2026", hint: "DD/MM/YYYY or YYYY-MM-DD." },
   { key: "subTotal", label: "Sub Total", required: true, example: "100000", hint: "Amount in ₹ before GST. Plain number, no commas." },
   { key: "gstAmount", label: "GST Amount", required: true, example: "18000", hint: "GST in ₹ (not a percentage). The GST rate is worked out from it." },
-  { key: "totalAmount", label: "Total Amount", required: true, example: "118000", hint: "Must equal Sub Total + GST Amount (±₹1)." },
+  { key: "otherAmount", label: "Other Amount", required: false, example: "2000", hint: "Optional extra charge in ₹, added to the total without GST. Leave blank or 0 if none." },
+  { key: "otherAmountDescription", label: "Other Amount Description", required: false, example: "Packing charges", hint: "Optional text explaining the Other Amount." },
+  { key: "totalAmount", label: "Total Amount", required: true, example: "120000", hint: "Must equal Sub Total + GST Amount + Other Amount (±₹1)." },
 ];
 
 // Rules listed under "File format requirements".
@@ -17,7 +19,8 @@ export const BULK_RECEIVABLE_FORMAT_NOTES = [
   "Upload a .xlsx, .xls or .csv file. Only the first sheet is read.",
   "Row 1 must be the header row. Use the column names from the template.",
   "GST Amount is the GST in rupees, not a percentage.",
-  "Total Amount = Sub Total + GST Amount. Rows that do not match are rejected.",
+  "Other Amount and its description are optional. Other Amount is not taxed; blank counts as 0 and it cannot be negative.",
+  "Total Amount = Sub Total + GST Amount + Other Amount. Rows that do not match are rejected.",
   "Invoice Number + GRN Number must be unique, including inside the same file.",
 ];
 
@@ -29,10 +32,13 @@ const COLUMN_ALIASES = {
   invoiceDate: ["invoicedate", "invoice_date", "invoice date", "date"],
   subTotal: ["subtotal", "sub_total", "sub total", "sub-total"],
   gstAmount: ["gstamount", "gst_amount", "gst amount", "gst"],
+  otherAmount: ["otheramount", "other_amount", "other amount"],
+  otherAmountDescription: ["otheramountdescription", "other_amount_description", "other amount description", "other description"],
   totalAmount: ["totalamount", "total_amount", "total amount", "invoice total"],
 };
 
-const REQUIRED_COLUMNS = BULK_RECEIVABLE_COLUMN_GUIDE.map((column) => column.key);
+// Optional columns may be missing from the sheet.
+const REQUIRED_COLUMNS = BULK_RECEIVABLE_COLUMN_GUIDE.filter((column) => column.required !== false).map((column) => column.key);
 
 // The sheet has a GST *amount*, the backend needs a GST *rate* (fraction, e.g. 0.18).
 // The rate is deliberately NOT rounded, so subTotal * gstRate gives back the exact GST amount.
@@ -58,6 +64,8 @@ export const parseBulkReceivableFile = async (file) => {
       subTotal,
       gstAmount, // kept for the preview; the backend recomputes it from gstRate
       gstRate: deriveGstRate(subTotal, gstAmount), // fraction, same as the single form
+      otherAmount: toAmount(row.otherAmount, 0),
+      otherAmountDescription: String(row.otherAmountDescription ?? "").trim(),
       totalAmount: toAmount(row.totalAmount, ""),
       __sourceRow: row.__sourceRow,
     };
