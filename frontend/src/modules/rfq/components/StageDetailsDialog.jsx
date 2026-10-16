@@ -1,6 +1,10 @@
 import { Modal } from "../../../components/ui";
 import { AttachmentList } from "./AttachmentField";
-import { BOM_STAGE, PURCHASE_ITEM_STAGES, attachmentLabel, formatDate, formatMoney, stageLabel } from "./rfqConfig";
+import RemarksPanel from "./RemarksPanel";
+import { BOM_STAGE, PURCHASE_ITEM_STAGES, STATUS_VIEW, attachmentLabel, formatDate, formatMoney, stageLabel, stageState } from "./rfqConfig";
+import { formatDateTime, humanize } from "../utils/rfqFormat";
+
+const EDIT_TOLERANCE_MS = 2000; // updatedAt is stamped a moment after createdAt on the same save
 
 const Section = ({ title, children }) => <div><h4 className="mb-1 text-xs font-bold uppercase tracking-wide text-slate-600">{title}</h4>{children}</div>;
 const Fact = ({ label, value }) => <div className="rounded-md bg-slate-50 px-2.5 py-1.5"><div className="text-xs font-semibold uppercase text-slate-600">{label}</div><div className="text-xs font-semibold text-slate-800">{value || "—"}</div></div>;
@@ -11,25 +15,36 @@ const MiniTable = ({ columns, rows }) => <div className="overflow-x-auto rounded
   </table>
 </div>;
 
-/** Read-only view of everything captured when a stage was completed. */
-export default function StageDetailsDialog({ stage, rfq, entry, components, onClose }) {
+/** Read-only view of a submitted stage: what was captured, who submitted it, and when the stage record was created / last updated (so edits are traceable). */
+export default function StageDetailsDialog({ stage, rfq, entry, components, remarks, onClose }) {
   const history = rfq.stage_history?.find((event) => event.stage === stage);
   const attachments = rfq.stage_attachments?.[stage] || [];
   const purchaseItems = (rfq.purchase_items || []).filter((item) => item.stage === stage);
   const bomLines = components.filter((component) => component.bom_stage === BOM_STAGE);
   const po = rfq.purchase_order;
+  // Records written before timestamps existed fall back to the submit time.
+  const createdAt = history?.createdAt || history?.completedAt;
+  const updatedAt = history?.updatedAt || createdAt;
+  const wasEdited = Boolean(createdAt && updatedAt && new Date(updatedAt) - new Date(createdAt) > EDIT_TOLERANCE_MS);
+  const state = stageState(entry, stage === rfq.current_stage);
 
   return <Modal open onClose={onClose} title={stageLabel(stage)} subtitle={`${rfq.rfq_number} · ${rfq.project_name}`} size="xl">
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
         <Fact label="Target Date" value={entry?.target_date ? formatDate(entry.target_date) : "Customer driven"} />
         <Fact label="Submit Date" value={formatDate(entry?.completed_date)} />
+        <Fact label="Status" value={STATUS_VIEW[state]?.label} />
         <Fact label="Submitted By" value={history?.user?.name} />
+        <Fact label="Submitter Role" value={humanize(history?.user?.role)} />
+        <Fact label="Created At" value={formatDateTime(createdAt)} />
+        <Fact label="Updated At" value={formatDateTime(updatedAt)} />
+        <Fact label="Edited After Submit" value={history ? (wasEdited ? "Yes" : "No") : undefined} />
         {stage === "COSTING" && <Fact label="Quoted Value" value={formatMoney(rfq.costing?.quoted_price)} />}
         {stage === "CUSTOMER_DECISION" && <Fact label="Decision" value={rfq.customer_decision?.decision} />}
       </div>
 
-      <Section title="Remarks"><p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">{history?.note || "No remarks."}</p></Section>
+      {history?.note && <Section title="Completion note"><p className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">{history.note}</p></Section>}
+      <Section title={`Remarks (${remarks.length})`}><RemarksPanel stage={stage} remarks={remarks} canAdd={false} /></Section>
       <Section title={attachmentLabel(stage)}><AttachmentList items={attachments} /></Section>
 
       {PURCHASE_ITEM_STAGES.has(stage) && <Section title="Purchase Items">

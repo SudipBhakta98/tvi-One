@@ -4,7 +4,15 @@
 export const ENDPOINTS = {
   AUTH: { LOGIN: "/auth/login", LOGOUT: "/auth/logout", ME: "/auth/me", CHANGE_PASSWORD: "/auth/change-password" },
 
-  RFQ: { BASE: "/rfq", COMPONENTS: "/components" },
+  RFQ: {
+    BASE: "/rfq",
+    COMPONENTS: "/components",
+    OWNERS: "/rfq/owners",
+    FILTER_OPTIONS: "/rfq/filter-options",
+    REPORT: "/rfq/report",
+    WORKFLOW: (rfqItemID) => `/rfq/${rfqItemID}/workflow`,
+    REMARKS: (rfqItemID) => `/rfq/${rfqItemID}/remarks`
+  },
   PROJECTS: { BASE: "/projects" },
   PURCHASE: { BASE: "/purchases" },
 

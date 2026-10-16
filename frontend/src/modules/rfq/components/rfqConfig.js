@@ -1,3 +1,5 @@
+import { ROLES } from "../../../constants/roles";
+
 // [key, label, hasTargetDate] — hasTargetDate=false means the stage is customer / event driven.
 export const STAGES = [
   ["CUSTOMER_RFQ_RECEIVED", "Customer RFQ Received", true],
@@ -22,15 +24,20 @@ export const STAGES = [
   ["MASS_PRODUCTION_HANDOVER", "Mass Production Handover — Convert RFQ to Project", true],
 ];
 
-// Only these roles can act on a stage (Admin / Super User / NPD Manager; SCM Manager on pilot capex).
+// Roles that can act on a stage regardless of ownership. The RFQ's Project Owner (an NPD User) is added by the server:
+// every RFQ response carries `permissions.can_update`, which the stage grid also honours.
 export const ROLE_MAP = {
   ADMIN: STAGES.map(([key]) => key),
   SUPER_USER: STAGES.map(([key]) => key),
   NPD_MANAGER: STAGES.map(([key]) => key),
+  NPD_SCRUM_MASTER: [],
   NPD_USER: [],
   SCM_MANAGER: ["CAPEX_PILOT_COMPONENTS"],
   SCM_USER: [],
 };
+
+// Mirrors CREATE_ROLES in backend rfqPermissions.js.
+export const RFQ_CREATE_ROLES = [ROLES.ADMIN, ROLES.SUPER_USER, ROLES.NPD_SCRUM_MASTER];
 
 export const TARGET_PHASES = {
   INITIAL: ["CUSTOMER_RFQ_RECEIVED", "DOCUMENT_REVIEW", "TECHNICAL_REVIEW", "FEASIBILITY_REVIEW", "DFM_REVIEW", "COMMERCIAL_REVIEW", "COSTING", "RFQ_SUBMITTED"],

@@ -6,15 +6,28 @@ import { Alert, GhostButton, Panel, PrimaryButton } from "../../../components/ui
 import { FormField, TextInput, TextAreaInput } from "../components/FormControls";
 import RfqFullPage from "../components/RfqFullPage";
 import AttachmentField from "../components/AttachmentField";
+import ProjectOwnerSelect from "../components/ProjectOwnerSelect";
 import { STAGES, TARGET_PHASES, blankMain, blankSub, emptyStageSchedule, errorMessage } from "../components/rfqConfig";
 
 const todayInput = () => new Date().toISOString().slice(0, 10);
 const initialStages = STAGES.filter(([stage]) => TARGET_PHASES.INITIAL.includes(stage));
 
-export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }) {
-  const [form, setForm] = useState(() => ({ rfq_number: "", customer: "", project_lead: defaultProjectLead || "", project_name: "", rfq_dated: todayInput(), description: "" }));
+const toFormPart = (part) => ({ ...blankMain(), ...part, sub_parts: (part.sub_parts || []).map((sub) => ({ ...blankSub(), ...sub })) });
+const toFormDetails = (rfq) => ({
+  rfq_number: rfq.rfq_number,
+  customer: rfq.customer,
+  project_owner: rfq.project_owner?._id || rfq.project_owner || "",
+  project_name: rfq.project_name,
+  rfq_dated: String(rfq.rfq_dated).slice(0, 10),
+  description: rfq.description,
+});
+
+/** Creates a new RFQ, or — when `rfq` is passed — edits that RFQ's details and part structure (NPD Manager / Admin / Super User). */
+export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
+  const isEdit = Boolean(rfq);
+  const [form, setForm] = useState(() => (isEdit ? toFormDetails(rfq) : { rfq_number: "", customer: "", project_owner: "", project_name: "", rfq_dated: todayInput(), description: "" }));
   const [targets, setTargets] = useState({});
-  const [mainParts, setMainParts] = useState([blankMain()]);
+  const [mainParts, setMainParts] = useState(() => (rfq?.main_parts?.length ? rfq.main_parts.map(toFormPart) : [blankMain()]));
   const [attachments, setAttachments] = useState([]);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -33,15 +46,22 @@ export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }
     try {
       const payload = {
         ...form,
-        stage_attachments: attachments.length ? { CUSTOMER_RFQ_RECEIVED: attachments } : {},
-        stage_schedule: emptyStageSchedule().map((item) => ({ ...item, target_date: targets[item.stage] || null })),
         main_parts: mainParts.map((part) => ({
           ...part,
           volume_per_annum_nos: Number(part.volume_per_annum_nos),
           sub_parts: part.sub_parts.filter((sub) => sub.sub_part_no.trim()).map((sub) => ({ ...sub, qty_per_main_part: Number(sub.qty_per_main_part) })),
         })),
       };
-      const response = await api.post(ENDPOINTS.RFQ.BASE, payload);
+      if (isEdit) {
+        await api.put(`${ENDPOINTS.RFQ.BASE}/${rfq._id}`, payload);
+        onSaved();
+        return;
+      }
+      const response = await api.post(ENDPOINTS.RFQ.BASE, {
+        ...payload,
+        stage_attachments: attachments.length ? { CUSTOMER_RFQ_RECEIVED: attachments } : {},
+        stage_schedule: emptyStageSchedule().map((item) => ({ ...item, target_date: targets[item.stage] || null })),
+      });
       onCreated(response.data.rfqItem._id);
     } catch (e) {
       setError(errorMessage(e, "Create failed"));
@@ -49,7 +69,7 @@ export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }
     }
   };
 
-  return <RfqFullPage title="Create New RFQ" subtitle="RFQ details → attachments → initial target dates → part structure" onClose={onClose}>
+  return <RfqFullPage title={isEdit ? `Edit RFQ ${rfq.rfq_number}` : "Create New RFQ"} subtitle={isEdit ? "Update RFQ details and part structure" : "RFQ details → attachments → initial target dates → part structure"} onClose={onClose}>
     <form onSubmit={submit} className="space-y-3">
       {error && <Alert>{error}</Alert>}
 
@@ -59,24 +79,24 @@ export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }
           <FormField label="Customer"><TextInput required value={form.customer} onChange={(e) => setField({ customer: e.target.value })} /></FormField>
           <FormField label="RFQ Date"><TextInput type="date" required value={form.rfq_dated} onChange={(e) => setField({ rfq_dated: e.target.value })} /></FormField>
           <FormField label="Project Name"><TextInput required value={form.project_name} onChange={(e) => setField({ project_name: e.target.value })} /></FormField>
-          <FormField label="Project Lead"><TextInput required value={form.project_lead} onChange={(e) => setField({ project_lead: e.target.value })} /></FormField>
+          <FormField label="Project Owner"><ProjectOwnerSelect value={form.project_owner} onChange={(projectOwner) => setField({ project_owner: projectOwner })} /></FormField>
         </div>
         <div className="mt-3"><FormField label="Description"><TextAreaInput required rows={3} value={form.description} onChange={(e) => setField({ description: e.target.value })} /></FormField></div>
       </Panel>
 
-      <Panel title="2 · Attachments" toolbar={<span className="text-xs text-slate-600">Customer RFQ, drawings, specs (Excel, PDF, Word, text, images or links)</span>}>
+      {!isEdit && <Panel title="2 · Attachments" toolbar={<span className="text-xs text-slate-600">Customer RFQ, drawings, specs (Excel, PDF, Word, text, images or links)</span>}>
         <AttachmentField items={attachments} onChange={setAttachments} />
-      </Panel>
+      </Panel>}
 
-      <Panel title="3 · Initial Target Dates" toolbar={<span className="text-xs text-slate-600">Later phases ask for their dates when the customer awards / approves</span>}>
+      {!isEdit && <Panel title="3 · Initial Target Dates" toolbar={<span className="text-xs text-slate-600">Later phases ask for their dates when the customer awards / approves</span>}>
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           {initialStages.map(([stage, label]) => <FormField key={stage} label={label}>
             <TextInput type="date" required value={targets[stage] || ""} onChange={(e) => setTargets((current) => ({ ...current, [stage]: e.target.value }))} />
           </FormField>)}
         </div>
-      </Panel>
+      </Panel>}
 
-      <Panel title="4 · Part Structure" toolbar={<GhostButton type="button" onClick={() => setMainParts((parts) => [...parts, blankMain()])}><Plus size={14} className="mr-1 inline" />Add Main Part</GhostButton>}>
+      <Panel title={`${isEdit ? 2 : 4} · Part Structure`} toolbar={<GhostButton type="button" onClick={() => setMainParts((parts) => [...parts, blankMain()])}><Plus size={14} className="mr-1 inline" />Add Main Part</GhostButton>}>
         <p className="mb-3 text-xs text-slate-600">One RFQ has many main parts; each main part can have any number of sub parts (optional).</p>
         <div className="space-y-3">
           {mainParts.map((part, mainIndex) => <div key={mainIndex} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -108,7 +128,7 @@ export default function RfqCreatePage({ defaultProjectLead, onClose, onCreated }
 
       <div className="sticky bottom-0 -mx-3 -mb-3 flex justify-end gap-2 border-t border-slate-200 bg-white px-4 py-3">
         <GhostButton type="button" onClick={onClose}>Cancel</GhostButton>
-        <PrimaryButton type="submit" disabled={saving}>{saving ? "Creating..." : "Create RFQ"}</PrimaryButton>
+        <PrimaryButton type="submit" disabled={saving}>{saving ? "Saving..." : isEdit ? "Save changes" : "Create RFQ"}</PrimaryButton>
       </div>
     </form>
   </RfqFullPage>;

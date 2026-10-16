@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard,
@@ -14,9 +14,10 @@ import {
   ChevronDown,
   Settings2,
   BarChart3,
+  Menu,
 } from "lucide-react";
 import { useAuth } from "../modules/auth/contexts/AuthContext";
-import { ROLES, ROLE_LABELS, ALL_ROLES } from "../constants/roles";
+import { ROLES, ROLE_LABELS, ALL_ROLES, DEPARTMENT_ROLES } from "../constants/roles";
 import { RECEIVABLE_APPROVER_ROLES } from "../modules/finance/constants/financeRoles";
 
 const canSee = (role, allowed) =>
@@ -30,10 +31,10 @@ const groups = [
     label: "RFQ & NPD",
     icon: FileText,
     path: "/rfq",
-    allowed: [ROLES.NPD_MANAGER, ROLES.NPD_USER],
+    allowed: DEPARTMENT_ROLES.NPD,
     children: [
       { label: "RFQ Register", to: "/rfq" },
-      { label: "Create RFQ", to: "/rfq?create=1", create: true },
+      { label: "Create RFQ", to: "/rfq?create=1", create: true, allowed: [ROLES.NPD_SCRUM_MASTER] },
     ],
   },
   {
@@ -252,12 +253,12 @@ function AccordionNode({ item, depth = 0 }) {
 }
 
 /**
- * Left-side navigation. Always visible, spans the full viewport height (not a header dropdown),
- * matching the rest of the app's slate/blue styling.
+ * Navigation drawer. It floats over the page (so it never takes width from the content) and is opened from the
+ * header's menu / logo area by hover or click; see AppLayout.
  */
-function Sidebar({ items, adminItem }) {
+function Sidebar({ items, adminItem, onMouseLeave }) {
   return (
-    <aside className="w-64 h-full shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
+    <aside onMouseLeave={onMouseLeave} className="fixed inset-y-0 left-0 z-[60] w-64 border-r border-slate-200 bg-white flex flex-col overflow-hidden shadow-2xl">
       <NavLink
         to="/"
         className="flex items-center gap-2.5 h-14 shrink-0 px-3 border-b border-slate-200"
@@ -309,11 +310,41 @@ export default function AppLayout() {
     nav("/login");
   };
 
+  // null = closed; "hover" = peeked by hovering the logo area (closes when the pointer leaves); "click" = pinned open until dismissed.
+  const [navMode, setNavMode] = useState(null);
+  const location = useLocation();
+  useEffect(() => { setNavMode(null); }, [location.pathname, location.search]);
+  useEffect(() => {
+    const closeOnEscape = (event) => event.key === "Escape" && setNavMode(null);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
+
   return (
-    <div className="w-screen h-screen flex bg-slate-50 text-slate-900 overflow-hidden font-sans">
-      <Sidebar items={visible} adminItem={adminItem} />
-      <div className="flex-1 min-w-0 flex flex-col">
-        <header className="h-14 shrink-0 border-b border-slate-200 bg-white flex items-center justify-end px-3 gap-3">
+    <div className="w-screen h-screen flex flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
+      {navMode && (
+        <>
+          <div className="fixed inset-0 z-[55] bg-slate-900/30" onClick={() => setNavMode(null)} />
+          <Sidebar items={visible} adminItem={adminItem} onMouseLeave={() => navMode === "hover" && setNavMode(null)} />
+        </>
+      )}
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <header className="h-14 shrink-0 border-b border-slate-200 bg-white flex items-center justify-between px-3 gap-3">
+          <button
+            type="button"
+            aria-label="Open navigation menu"
+            onClick={() => setNavMode((mode) => (mode === "click" ? null : "click"))}
+            onMouseEnter={() => setNavMode((mode) => mode || "hover")}
+            className="flex items-center gap-2.5 rounded-lg px-1.5 py-1 hover:bg-slate-100"
+          >
+            <Menu size={20} className="text-slate-600" />
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-black text-white text-sm shadow-sm">TV</div>
+            <div className="text-left">
+              <strong className="block text-sm text-slate-900">TVI One</strong>
+              <small className="text-[10px] text-slate-500">Manufacturing ERP</small>
+            </div>
+          </button>
+          <div className="flex items-center gap-3">
           <div className="hidden xl:block text-right">
             <strong className="block text-xs text-slate-700">
               {user?.name}
@@ -330,6 +361,7 @@ export default function AppLayout() {
           >
             <LogOut size={15} />
           </button>
+          </div>
         </header>
         <div className="flex-1 min-h-0 overflow-y-auto">
           <main className="max-w-[1800px] mx-auto p-3">

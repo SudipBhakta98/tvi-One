@@ -11,6 +11,8 @@ import Payable from "../../finance/models/payableModel.js";
 import Payment from "../../finance/models/paymentModel.js";
 import Credit from "../../finance/models/creditModel.js";
 import Debit from "../../finance/models/debitModel.js";
+import { rfqScope, reportDepartmentsFor } from "../../rfq/services/rfqPermissions.js";
+import { buildRfqReport } from "../../rfq/services/rfqReport.js";
 
 const dateRange = (from, to) => {
   if (!from && !to) return null;
@@ -80,7 +82,8 @@ const productionGroups = async (match) => {
 export const getRfqDashboard = async (req, res) => {
   try {
     const range = dateRange(req.query.from_date, req.query.to_date);
-    const match = { ...scoped("rfq_dated", range) };
+    // NPD users only ever see the RFQs they own, on the dashboards too.
+    const match = { ...scoped("rfq_dated", range), ...rfqScope(req.user) };
     if (req.query.rfq_status) match.rfq_status = req.query.rfq_status;
     if (req.query.current_stage) match.current_stage = req.query.current_stage;
     if (req.query.customer) match.customer = req.query.customer;
@@ -240,28 +243,29 @@ export const getDepartmentReport = async (req, res) => {
   try {
     const department = String(req.query.department || "all").toLowerCase();
     const range = reportRange(req.query.from_date, req.query.to_date);
+    // NPD roles may only report on NPD departments; "all" expands to what the role is allowed to see.
+    const allowed = reportDepartmentsFor(req.user.role);
+    const requested = department === "all" ? allowed : [department];
+    if (requested.some((dept) => !allowed.includes(dept))) return res.status(403).json({ success: false, message: "Your role cannot access this department's report" });
     const reports = {};
-    if (department === "all" || department === "rfq") {
-      const rows = await RfqItem.find(scoped("rfq_dated", range)).select("rfq_number customer project_name rfq_dated current_stage rfq_status").sort({ rfq_dated: -1 }).lean();
-      reports.rfq = { count: rows.length, rows };
-    }
-    if (department === "all" || department === "purchase") {
+    if (requested.includes("rfq")) reports.rfq = await buildRfqReport(req.user, req.query);
+    if (requested.includes("purchase")) {
       const rows = await PurchaseOrder.find(scoped("createdAt", range)).select("po_number supplier purchase_type total_quantity cost status createdAt").sort({ createdAt: -1 }).lean();
       reports.purchase = { count: rows.length, quantity: sum(rows, "total_quantity"), cost: sum(rows, "cost"), rows };
     }
-    if (department === "all" || department === "production") {
+    if (requested.includes("production")) {
       const rows = await Production.find(scoped("date", range)).select("date project finished_qty qc_status operator_name stage machine").populate("project", "project_name").populate("stage machine", "name code").sort({ date: -1 }).lean();
       reports.production = { count: rows.length, quantity: sum(rows, "finished_qty"), rows };
     }
-    if (department === "all" || department === "warehouse") {
+    if (requested.includes("warehouse")) {
       const rows = await GRN.find(scoped("received_date", range)).select("received_date purchase_order invoice_number received_qty accepted_qty rejected_qty quality_status").populate("purchase_order", "po_number supplier").sort({ received_date: -1 }).lean();
       reports.warehouse = { count: rows.length, received_qty: sum(rows, "received_qty"), accepted_qty: sum(rows, "accepted_qty"), rejected_qty: sum(rows, "rejected_qty"), rows };
     }
-    if (department === "all" || department === "dispatch") {
+    if (requested.includes("dispatch")) {
       const rows = await Dispatch.find(scoped("date", range)).select("date project dispatched_qty vehicle_number customer_reference").populate("project", "project_name customer").sort({ date: -1 }).lean();
       reports.dispatch = { count: rows.length, dispatched_qty: sum(rows, "dispatched_qty"), rows };
     }
-    if (department === "all" || department === "finance") {
+    if (requested.includes("finance")) {
       const [payables, payments, credits, debits] = await Promise.all([
         Payable.find(scoped("invoiceDate", range)).select("invoiceNumber grnNumber supplierName invoiceDate payableAmount totalAmount").sort({ invoiceDate: -1 }).lean(),
         Payment.find(scoped("paymentDate", range)).select("invoiceNumber supplierName paidAmount paymentDate status paymentMethod").sort({ paymentDate: -1 }).lean(),
@@ -270,10 +274,10 @@ export const getDepartmentReport = async (req, res) => {
       ]);
       reports.finance = { payable_count: payables.length, payable_amount: sum(payables, "payableAmount"), payment_count: payments.length, paid_amount: sum(payments, "paidAmount"), credit_count: credits.length, credit_amount: sum(credits, "creditNoteAmount"), debit_count: debits.length, debit_amount: sum(debits, "debitAmount"), rows: { payables, payments, credits, debits } };
     }
-    if (department === "all" || department === "projects") {
+    if (requested.includes("projects")) {
       const rows = await Project.find(scoped("createdAt", range)).select("project_name customer project_owner order_qty status createdAt").sort({ createdAt: -1 }).lean();
       reports.projects = { count: rows.length, order_qty: sum(rows, "order_qty"), rows };
     }
-    res.json({ success: true, department, from_date: req.query.from_date || null, to_date: req.query.to_date || null, reports });
+    res.json({ success: true, department, from_date: req.query.from_date || null, to_date: req.query.to_date || null, allowed_departments: allowed, reports });
   } catch (error) { res.status(500).json({ success: false, message: "Report generation failed", error: error.message }); }
 };

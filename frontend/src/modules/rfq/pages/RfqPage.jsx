@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Activity,
@@ -19,7 +19,8 @@ import {
 import RfqRegister from "../components/RfqRegister";
 import RfqCreatePage from "./RfqCreatePage";
 import RfqDetailPage from "./RfqDetailPage";
-import { formatMoney } from "../components/rfqConfig";
+import useRfqFilters from "../hooks/useRfqFilters";
+import { RFQ_CREATE_ROLES, formatMoney } from "../components/rfqConfig";
 
 const OPEN_STATUSES = [
   "ACTIVE",
@@ -40,21 +41,24 @@ export default function RfqPage() {
 
   const [params, setParams] = useSearchParams();
 
-  const [filters, setFilters] = useState({
-    search: "",
-    month: "",
-    customer: "",
-    projectLead: "",
-    status: "",
-    stage: "",
-  });
+  // Search filters in the browser; the Excel-style column filters (including Month) are sent to the server, which also supplies their options.
+  const [filters, setFilters] = useState({ search: "" });
+  const columnFilters = useRfqFilters();
 
-  const showCreate = params.get("create") === "1";
+  const canCreate = RFQ_CREATE_ROLES.includes(user?.role);
+  const showCreate = params.get("create") === "1" && canCreate;
   const selectedId = params.get("id");
 
   useEffect(() => {
-    load();
-  }, [load]);
+    load({ params: columnFilters.params }).catch(() => {});
+  }, [load, columnFilters.params]);
+
+  // Reload with the active filters (a plain load() would drop them) and refresh the dropdown values.
+  const { reloadOptions } = columnFilters;
+  const reload = useCallback(() => {
+    reloadOptions();
+    return load({ params: columnFilters.params }, { force: true }).catch(() => {});
+  }, [load, columnFilters.params, reloadOptions]);
 
   /**
    * Filter RFQs.
@@ -74,40 +78,8 @@ export default function RfqPage() {
           .join(" ")}
       `.toLowerCase();
 
-      const d = r.rfq_dated
-        ? new Date(r.rfq_dated)
-        : null;
-
       return (
         haystack.includes(filters.search.toLowerCase())
-
-        && (
-          !filters.month ||
-          (
-            d &&
-            d.getMonth() === Number(filters.month)
-          )
-        )
-
-        && (
-          !filters.customer ||
-          r.customer === filters.customer
-        )
-
-        && (
-          !filters.projectLead ||
-          r.project_lead === filters.projectLead
-        )
-
-        && (
-          !filters.status ||
-          r.rfq_status === filters.status
-        )
-
-        && (
-          !filters.stage ||
-          r.current_stage === filters.stage
-        )
       );
     });
   }, [rows, filters]);
@@ -177,10 +149,9 @@ export default function RfqPage() {
   if (showCreate) {
     return (
       <RfqCreatePage
-        defaultProjectLead={user?.name || ""}
         onClose={backToRegister}
         onCreated={(id) => {
-          load();
+          reload();
           openRfq(id);
         }}
       />
@@ -193,7 +164,7 @@ export default function RfqPage() {
         rfqId={selectedId}
         user={user}
         onClose={backToRegister}
-        onChanged={load}
+        onChanged={reload}
       />
     );
   }
@@ -205,11 +176,13 @@ export default function RfqPage() {
         title="RFQ & NPD"
         subtitle="Pipeline visibility, costing value, stage performance and customer decision tracking."
         actions={
-          <AddButton
-            onClick={() => setParams({ create: "1" })}
-          >
-            New RFQ
-          </AddButton>
+          canCreate && (
+            <AddButton
+              onClick={() => setParams({ create: "1" })}
+            >
+              New RFQ
+            </AddButton>
+          )
         }
       />
 
@@ -279,7 +252,12 @@ export default function RfqPage() {
       </div>
 
       <RfqRegister
-        rows={rows}
+        rows={filteredRows}
+        options={columnFilters.options}
+        columnFilters={columnFilters.filters}
+        hasColumnFilters={columnFilters.hasFilters}
+        onColumnFilterChange={columnFilters.setColumn}
+        onResetColumnFilters={columnFilters.reset}
         onSelect={openRfq}
         filters={filters}
         onFiltersChange={setFilters}

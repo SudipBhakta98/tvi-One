@@ -4,3 +4,5 @@ backend/.env
 dist/
 .DS_Store
 npm-debug.log*
+.env*
+frontend/.env*

@@ -7,7 +7,7 @@ import dotenv from "dotenv";
 import connectDB from "./config/dbConfig.js";
 import { authenticate } from "./middleware/authMiddleware.js";
 import { requireRoles, authorizeModule, deptWriteGuard, anyManagerWriteGuard } from "./middleware/rbacMiddleware.js";
-import { ROLES, ALL_ROLES, DEPARTMENTS } from "./constants/roles.js";
+import { ROLES, ALL_ROLES, DEPARTMENTS, DEPARTMENT_ROLES } from "./constants/roles.js";
 
 import authRoutes from "./modules/auth/authRoutes.js";
 import adminRoutes from "./modules/admin/adminRoutes.js";
@@ -57,8 +57,9 @@ app.use(authenticate);
 app.use(auditRequest);
 
 // --- NPD department (RFQ + prototype components) --------------------------
-app.use("/api/rfq", authorizeModule(ROLES.NPD_MANAGER, ROLES.NPD_USER), deptWriteGuard(DEPARTMENTS.NPD), rfqRoutes);
-app.use("/api/components", authorizeModule(ROLES.NPD_MANAGER, ROLES.NPD_USER, ROLES.SCM_MANAGER, ROLES.SCM_USER), deptWriteGuard(DEPARTMENTS.NPD), componentRoutes);
+// RFQ routes enforce create / update / edit / delete / ownership themselves (rfqPermissions.js), so no deptWriteGuard here.
+app.use("/api/rfq", authorizeModule(...DEPARTMENT_ROLES.NPD), rfqRoutes);
+app.use("/api/components", authorizeModule(...DEPARTMENT_ROLES.NPD, ROLES.SCM_MANAGER, ROLES.SCM_USER), deptWriteGuard(DEPARTMENTS.NPD), componentRoutes);
 
 // --- Cross-department register --------------------------------------------
 app.use("/api/projects", authorizeModule(...ALL_ROLES), anyManagerWriteGuard(), projectRoutes);
@@ -125,5 +126,5 @@ app.use((err, req, res, next) => {
 
 const port = process.env.PORT || 5000;
 connectDB()
-  .then(() => app.listen(port, () => console.log(`TVI One API running on http://localhost:${port}`)))
+  .then(() => app.listen(port,"0.0.0.0", () => console.log(`TVI One API running on http://localhost:${port}`)))
   .catch((e) => { console.error("DB connection failed:", e.message); process.exit(1); });

@@ -1,4 +1,4 @@
-import { Eye, Lock, Paperclip } from "lucide-react";
+import { Eye, Lock, MessageSquarePlus, Paperclip, Pencil } from "lucide-react";
 import { GhostButton } from "../../../components/ui";
 import { STATUS_VIEW, formatDate } from "./rfqConfig";
 
@@ -17,7 +17,7 @@ const Meta = ({ label, value }) => <div className="rounded-md bg-slate-50 px-2.5
 </div>;
 
 /** One stage: name, status, target date, submit date, plus a body (`children`) for the open stage. */
-export default function RfqStageCard({ number, label, hasTarget, entry, state, remarks, attachmentCount, onView, children }) {
+export default function RfqStageCard({ number, label, hasTarget, entry, state, remarks, remarkCount, attachmentCount, onView, onAddRemark, onEdit, children }) {
   const status = STATUS_VIEW[state];
   const finished = FINISHED_STATES.has(state);
 
@@ -35,12 +35,17 @@ export default function RfqStageCard({ number, label, hasTarget, entry, state, r
       <Meta label="Submit Date" value={formatDate(entry?.completed_date)} />
     </div>
 
-    {children ?? (finished
+    {children}
+    {children && state !== "UPCOMING" && <GhostButton type="button" onClick={onAddRemark} className="self-start"><MessageSquarePlus size={13} className="mr-1 inline" />Add remarks ({remarkCount})</GhostButton>}
+    {!children && (finished
       ? <div className="space-y-2">
           <p className="line-clamp-2 text-xs text-slate-600"><span className="font-semibold text-slate-700">Remarks: </span>{remarks || "No remarks"}</p>
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1 text-xs text-slate-600"><Paperclip size={12} /> {attachmentCount} attachment{attachmentCount === 1 ? "" : "s"}</span>
-            <GhostButton type="button" onClick={onView}><Eye size={13} className="mr-1 inline" />View details</GhostButton>
+            <div className="flex gap-1.5">
+              {onEdit && <GhostButton type="button" onClick={onEdit}><Pencil size={13} className="mr-1 inline" />Edit</GhostButton>}
+              <GhostButton type="button" onClick={onView}><Eye size={13} className="mr-1 inline" />View details</GhostButton>
+            </div>
           </div>
         </div>
       : <p className="flex items-center gap-1.5 text-xs text-slate-600"><Lock size={12} /> Unlocks after the previous stage is completed.</p>)}

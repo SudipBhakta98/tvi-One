@@ -110,3 +110,18 @@ Removed: `RfqCreateModal`, `RfqDetailModal`, `RfqLifecycle`, `RfqStageAction`, `
 ## 9. Not covered here
 
 Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Production hand-offs live in their own modules and were not changed.
+
+## Access, remarks, filters and reports (NPD update)
+
+- **Roles:** `NPD_SCRUM_MASTER` creates RFQs; the RFQ's **Project Owner** (an `NPD_USER`) updates stages; **NPD Manager** edits RFQ fields; only **Admin / Super User** delete. An `NPD_USER` only ever sees RFQs they own (enforced by the server: `rfqScope` in `backend/modules/rfq/services/rfqPermissions.js`, also applied to the RFQ dashboard and report).
+- **Project Owner** is a user (`project_owner`), picked from `GET /rfq/owners`. `project_lead` is still stored (the owner's name, set by the server) so Projects and dashboards keep working.
+- **Remarks:** append-only, per stage, unlimited (`POST /rfq/:id/remarks`). Shown in the stage card (newest), in "Details & remarks", and in the register (newest remark of the current stage).
+- **Current stage** has no remarks input; its "Add remarks" button opens a dialog (`AddRemarkDialog`). **View details** on a submitted stage is read-only and shows the stage's Created At, Updated At and whether it was edited after submission (stage history entries carry timestamps; editing the RFQ marks the RFQ-received stage as updated).
+- **Edit / Delete** buttons on the RFQ page follow `permissions` from the server: edit = NPD Manager, Admin, Super User; delete = Admin, Super User (an RFQ already converted to a project cannot be deleted).
+- **Navigation** is a floating drawer opened by hovering or clicking the menu / logo area in the header.
+- **Filters:** Excel-style multi-select on Customer, Project, Owner, Stage and Status. Option lists come from `GET /rfq/filter-options`; filtering is done by the server (`?customer=A|B`). Search and month stay in the browser.
+- **Reports:** `/dashboard/reports?department=rfq` returns a detailed report (one row per RFQ with all fields, plus parts, sub-parts, stage schedule, remarks, history, purchase items, deliveries and attachments). NPD roles can only request `projects` and `rfq` (`NPD_REPORT_DEPARTMENTS`).
+
+## Remarks rule and stage editing
+- A stage cannot be completed until it has at least one remark (enforced in `transitionRfq`); remarks can be added any number of times from the current stage's "Add remarks" button.
+- A submitted stage can be corrected with **Edit** (NPD Manager, Admin, Super User): target date, submit date, attachments, and the quoted value (Costing) or PO number / quantity (Customer PO). The stage's Updated At changes, so View details shows "Edited After Submit: Yes".

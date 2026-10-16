@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, IndianRupee, Layers, ListChecks } from "lucide-react";
+import { Activity, IndianRupee, Layers, ListChecks, Pencil, Trash2 } from "lucide-react";
 import api from "../../../services/api";
 import { ENDPOINTS } from "../../../services/endpoints";
-import { Alert, KpiCard } from "../../../components/ui";
+import { Alert, GhostButton, KpiCard } from "../../../components/ui";
 import RfqFullPage from "../components/RfqFullPage";
+import RfqCreatePage from "./RfqCreatePage";
 import RfqParts from "../components/RfqParts";
 import RfqStageGrid from "../components/RfqStageGrid";
 import {
@@ -19,6 +20,7 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -58,7 +60,23 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
       </RfqFullPage>
     );
 
-  const { rfq, stage_schedule: schedule } = data;
+  const { rfq, stage_schedule: schedule, permissions } = data;
+
+  if (editing) {
+    return <RfqCreatePage rfq={rfq} onClose={() => setEditing(false)} onSaved={async () => { setEditing(false); await reload(); }} />;
+  }
+
+  // Edit / delete are offered by the server's permissions (edit: NPD Manager, Admin, Super User; delete: Admin, Super User).
+  const remove = async () => {
+    if (!window.confirm(`Delete RFQ ${rfq.rfq_number}? This cannot be undone.`)) return;
+    try {
+      await api.delete(`${ENDPOINTS.RFQ.BASE}/${rfqId}`);
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e, "Unable to delete RFQ"));
+    }
+  };
   const current = rfq.current_stage;
   const doneCount = schedule.filter((item) => item.completed_date).length;
   const subPartCount = (rfq.main_parts || []).reduce(
@@ -71,6 +89,10 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
       title={`${rfq.rfq_number} · ${rfq.project_name}`}
       subtitle={`${rfq.customer} · Project lead ${rfq.project_lead}`}
       onClose={onClose}
+      actions={<>
+        {permissions?.can_edit && <GhostButton type="button" onClick={() => setEditing(true)}><Pencil size={13} className="mr-1 inline" />Edit</GhostButton>}
+        {permissions?.can_delete && <button type="button" onClick={remove} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={13} />Delete</button>}
+      </>}
     >
       {error && <Alert>{error}</Alert>}
       {message && <Alert type="success">{message}</Alert>}

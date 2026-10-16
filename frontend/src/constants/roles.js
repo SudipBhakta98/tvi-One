@@ -3,6 +3,7 @@ export const ROLES = {
   ADMIN: "ADMIN",
   SUPER_USER: "SUPER_USER",
   NPD_MANAGER: "NPD_MANAGER",
+  NPD_SCRUM_MASTER: "NPD_SCRUM_MASTER",
   NPD_USER: "NPD_USER",
   SCM_MANAGER: "SCM_MANAGER",
   SCM_USER: "SCM_USER",
@@ -22,6 +23,7 @@ export const ROLE_LABELS = {
   ADMIN: "Admin",
   SUPER_USER: "Super User",
   NPD_MANAGER: "NPD Manager",
+  NPD_SCRUM_MASTER: "NPD Scrum Master",
   NPD_USER: "NPD User",
   SCM_MANAGER: "SCM Manager",
   SCM_USER: "SCM User",
@@ -36,7 +38,7 @@ export const ROLE_LABELS = {
 };
 
 export const DEPARTMENT_ROLES = {
-  NPD: [ROLES.NPD_MANAGER, ROLES.NPD_USER],
+  NPD: [ROLES.NPD_MANAGER, ROLES.NPD_SCRUM_MASTER, ROLES.NPD_USER],
   SCM: [ROLES.SCM_MANAGER, ROLES.SCM_USER],
   PRODUCTION: [ROLES.PRODUCTION_MANAGER, ROLES.PRODUCTION_USER],
   WAREHOUSE: [ROLES.WAREHOUSE_MANAGER, ROLES.WAREHOUSE_USER],
@@ -44,7 +46,8 @@ export const DEPARTMENT_ROLES = {
   FINANCE: [ROLES.FINANCE_MANAGER, ROLES.FINANCE_USER]
 };
 
+const GLOBAL_ROLES = [ROLES.ADMIN, ROLES.SUPER_USER];
 // True if `role` may create/edit/delete records for `dept` (or is a global override).
-export const isDeptManager = (role, dept) => role === "ADMIN" || role === "SUPER_USER" || role === `${dept}_MANAGER`;
-// True if `role` may at least view/create records for `dept`.
-export const isDeptMember = (role, dept) => isDeptManager(role, dept) || role === `${dept}_USER`;
+export const isDeptManager = (role, dept) => GLOBAL_ROLES.includes(role) || role === `${dept}_MANAGER`;
+// True if `role` belongs to `dept` at all (any of its roles, including extra ones like the NPD Scrum Master).
+export const isDeptMember = (role, dept) => GLOBAL_ROLES.includes(role) || Boolean(DEPARTMENT_ROLES[dept]?.includes(role));

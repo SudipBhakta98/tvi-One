@@ -36,8 +36,5 @@ export const PURCHASE_TYPE = ["RFQ_NPD", "PRODUCTION"];
 export const QC_STATUS = ["PENDING", "PASSED", "FAILED"];
 export const HALF_VOLUME_SPLIT_RATIO = 0.5;
 
-export const WORKFLOW_STAGES = [
-  "TECHNICAL_REVIEW", "DFM_REVIEW", "COMMERCIAL_REVIEW", "COSTING", "RFQ_AWARDED",
-  "PROTO_BUILD", "PROTO_SUBMITTED", "CAPEX_PILOT_COMPONENTS", "PILOT_BUILD", "PILOT_SUBMITTED",
-  "CUSTOMER_APPROVAL", "MASS_PRODUCTION_HANDOVER"
-];
+// Every real lifecycle stage (the open-stage values without the final COMPLETED marker).
+export const WORKFLOW_STAGES = CURRENT_STAGE.filter((stage) => stage !== "COMPLETED");

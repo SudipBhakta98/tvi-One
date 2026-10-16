@@ -5,7 +5,7 @@ import User from "../modules/auth/userModel.js";
 dotenv.config();
 
 await connectDB();
-const email = (process.env.ADMIN_EMAIL || "admin@tvione.local").toLowerCase();
+const email = (process.env.ADMIN_EMAIL ).toLowerCase();
 const existing = await User.findOne({ email });
 if (existing) {
   console.log(`Admin already exists: ${email}`);
@@ -14,7 +14,7 @@ if (existing) {
 const user = await User.create({
   name: process.env.ADMIN_NAME || "TVI One Admin",
   email,
-  passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD || "ChangeMe123!", 12),
+  passwordHash: await bcrypt.hash(process.env.ADMIN_PASSWORD , 12),
   role: "ADMIN",
   department: "ADMIN"
 });

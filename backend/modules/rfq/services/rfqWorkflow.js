@@ -1,6 +1,8 @@
 import RfqItem from "../models/rfqItemModel.js";
 import Component from "../models/componentModel.js";
 import convertRfqToProject from "./convertRfqToProject.js";
+import { ROLES } from "../../../constants/roles.js";
+import { EDIT_ROLES, isProjectOwner } from "./rfqPermissions.js";
 
 export const STAGES = [
   "CUSTOMER_RFQ_RECEIVED", "DOCUMENT_REVIEW", "TECHNICAL_REVIEW", "FEASIBILITY_REVIEW",
@@ -28,10 +30,10 @@ export const TARGET_PHASES = {
   MASS_PRODUCTION: ["ACTUAL_BOM", "MASS_PRODUCTION_HANDOVER"],
 };
 
-// Only Admin / Super User / NPD Manager may complete a stage; SCM Manager also owns the pilot capex stage.
-const MANAGER_ROLES = ["ADMIN", "SUPER_USER", "NPD_MANAGER"];
-const STAGE_ROLES = { CAPEX_PILOT_COMPONENTS: [...MANAGER_ROLES, "SCM_MANAGER"] };
-export const canActOnStage = (role, stage) => (STAGE_ROLES[stage] || MANAGER_ROLES).includes(role);
+// A stage may be completed by the RFQ's project owner or an edit-level role; some stages are also owned by another department.
+const STAGE_EXTRA_ROLES = { CAPEX_PILOT_COMPONENTS: [ROLES.SCM_MANAGER] };
+export const canActOnStage = (user, rfq, stage) =>
+  EDIT_ROLES.includes(user.role) || isProjectOwner(user, rfq) || Boolean(STAGE_EXTRA_ROLES[stage]?.includes(user.role));
 
 // Stages that cannot be completed without at least one attachment. Add a stage key here to make its upload mandatory.
 const ATTACHMENT_REQUIRED_STAGES = new Set(["CUSTOMER_DECISION", "CUSTOMER_APPROVAL_PILOT", "CUSTOMER_APPROVAL_MASS_PRODUCTION", "CUSTOMER_PO_RECEIVED"]);
@@ -122,6 +124,16 @@ const parsePurchaseOrder = (data) => {
   return { po_number: poNumber, po_qty: poQty, delivery_schedule: schedule };
 };
 
+const toDate = (value, label) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error(`${label} is not a valid date`);
+  return date;
+};
+const normalizeAttachments = (items, now) => items.map((item) => ({
+  file_name: item.file_name, file_type: item.file_type || "", file_size: Number(item.file_size || 0), url: item.url || "", storage_provider: item.storage_provider || "PENDING_CLOUD_UPLOAD", uploaded_at: item.uploaded_at ? new Date(item.uploaded_at) : now,
+}));
+const attachmentsOf = (rfq) => (rfq.stage_attachments instanceof Map ? Object.fromEntries(rfq.stage_attachments) : (rfq.stage_attachments || {}));
+
 const completionPayload = (rfq, stage, data, targets) => {
   const now = new Date();
   const updates = { stage_schedule: buildSchedule(rfq, targets, stage, now) };
@@ -151,15 +163,15 @@ const completionPayload = (rfq, stage, data, targets) => {
 
 export const transitionRfq = async (rfqId, stage, data, user) => {
   if (!STAGES.includes(stage)) throw new Error("Invalid workflow stage");
-  if (!canActOnStage(user.role, stage)) throw new Error(`Role ${user.role} cannot perform ${stage}`);
-
   const rfq = await RfqItem.findById(rfqId);
   if (!rfq) throw new Error("RFQ not found");
+  if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot perform ${stage}`);
   if (rfq.current_stage !== stage) throw new Error(`Current stage is ${label(String(rfq.current_stage))}`);
 
   for (const prerequisite of prerequisites[stage]) {
     if (!completed(rfq, prerequisite)) throw new Error(`${label(prerequisite)} must be completed first`);
   }
+  if (!rfq.stage_remarks?.some((remark) => remark.stage === stage)) throw new Error("Add at least one remark before completing this stage");
 
   if (TARGET_PHASES.INITIAL.includes(stage) && !getScheduleEntry(rfq, stage)?.target_date) {
     throw new Error(`Set the target date for ${label(stage)} before completing this stage`);
@@ -176,10 +188,7 @@ export const transitionRfq = async (rfqId, stage, data, user) => {
 
   const { updates, now } = completionPayload(rfq, stage, data, targets);
   if (Array.isArray(data.attachments) && data.attachments.length) {
-    const current = rfq.stage_attachments instanceof Map ? Object.fromEntries(rfq.stage_attachments) : (rfq.stage_attachments || {});
-    updates.stage_attachments = { ...current, [stage]: data.attachments.map((item) => ({
-      file_name: item.file_name, file_type: item.file_type || "", file_size: Number(item.file_size || 0), url: item.url || "", storage_provider: item.storage_provider || "PENDING_CLOUD_UPLOAD", uploaded_at: item.uploaded_at ? new Date(item.uploaded_at) : now,
-    })) };
+    updates.stage_attachments = { ...attachmentsOf(rfq), [stage]: normalizeAttachments(data.attachments, now) };
   }
   rfq.set(updates);
   rfq.stage_history.push({ stage, action: "COMPLETED", user: user._id, note: data.note, completedAt: now });
@@ -190,13 +199,44 @@ export const transitionRfq = async (rfqId, stage, data, user) => {
   return { rfq, project };
 };
 
+// Corrects an already submitted stage: its target / submit date, its attachments, and the quoted value or PO of the stages that have one.
+// Marks the stage as updated so the change is traceable (stage history updatedAt).
+export const editStage = async (rfqId, stage, data) => {
+  if (!STAGES.includes(stage)) throw new Error("Invalid workflow stage");
+  const rfq = await RfqItem.findById(rfqId);
+  if (!rfq) throw new Error("RFQ not found");
+  const entry = getScheduleEntry(rfq, stage);
+  if (!entry?.completed_date) throw new Error("Only a submitted stage can be edited");
+
+  if (TARGET_DATE_STAGES.has(stage) && data.target_date) entry.target_date = toDate(data.target_date, "Target date");
+  if (data.completed_date) entry.completed_date = toDate(data.completed_date, "Submit date");
+  if (Array.isArray(data.attachments)) {
+    if (ATTACHMENT_REQUIRED_STAGES.has(stage) && data.attachments.length === 0) throw new Error("At least one attachment is required for this stage");
+    rfq.set("stage_attachments", { ...attachmentsOf(rfq), [stage]: normalizeAttachments(data.attachments, new Date()) });
+  }
+  if (stage === "COSTING" && data.quoted_price !== undefined) {
+    if (!(Number(data.quoted_price) > 0)) throw new Error("Quoted value must be greater than zero");
+    rfq.set("costing.quoted_price", Number(data.quoted_price));
+  }
+  if (stage === "CUSTOMER_PO_RECEIVED" && (data.po_number !== undefined || data.po_qty !== undefined)) {
+    const current = rfq.purchase_order?.toObject?.() || {};
+    // The delivery schedule stays as it is; parsePurchaseOrder re-checks it still fits the new quantity.
+    const next = parsePurchaseOrder({ po_number: data.po_number ?? current.po_number, po_qty: data.po_qty ?? current.po_qty, delivery_schedule: current.delivery_schedule });
+    rfq.set("purchase_order", { ...current, ...next });
+  }
+
+  const history = rfq.stage_history.find((event) => event.stage === stage);
+  if (history) history.updatedAt = new Date();
+  await rfq.save();
+  return rfq;
+};
+
 // Replaces the purchase items of one Capex / Tooling stage. Items are optional, so an empty list is valid.
 export const savePurchaseItems = async (rfqId, stage, items, user) => {
   if (!PURCHASE_ITEM_STAGES.has(stage)) throw new Error("Purchase items are not used at this stage");
-  if (!canActOnStage(user.role, stage)) throw new Error(`Role ${user.role} cannot edit ${label(stage)}`);
-
   const rfq = await RfqItem.findById(rfqId);
   if (!rfq) throw new Error("RFQ not found");
+  if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot edit ${label(stage)}`);
   if (rfq.current_stage !== stage) throw new Error("Purchase items can only be edited while this stage is open");
 
   const cleaned = (items || [])

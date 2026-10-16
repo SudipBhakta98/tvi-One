@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Boxes, PackagePlus } from "lucide-react";
 import { Alert, GhostButton, PrimaryButton } from "../../../components/ui";
-import { TextInput, TextAreaInput } from "./FormControls";
+import { TextInput } from "./FormControls";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import AttachmentField from "./AttachmentField";
 import BomDialog from "./BomDialog";
@@ -19,18 +19,21 @@ const Caption = ({ children }) => <div className="mb-1 text-xs font-semibold tex
 
 /** Inputs + action buttons for the currently open stage (Admin / Manager only). */
 export default function StageActionPanel({ rfq, stage, components, onComplete, onReload }) {
-  const [note, setNote] = useState("");
   const [files, setFiles] = useState([]);
   const [price, setPrice] = useState("");
   const [dialog, setDialog] = useState(null); // "targets" | "po" | "purchase" | "bom"
   const [pendingPayload, setPendingPayload] = useState(null);
   const { run, busy, error } = useAsyncAction();
 
+  // The server refuses to complete a stage that has no remark, so the buttons wait for one (added with the "Add remarks" button).
+  const hasRemark = (rfq.stage_remarks || []).some((remark) => remark.stage === stage);
+  const blocked = busy || !hasRemark;
+
   const evidenceRequired = CUSTOMER_EVIDENCE_STAGES.has(stage);
   const purchaseItems = (rfq.purchase_items || []).filter((item) => item.stage === stage);
   const closeDialog = () => setDialog(null);
 
-  const submit = (payload) => onComplete(stage, { ...payload, note: note.trim(), attachments: files });
+  const submit = (payload) => onComplete(stage, { ...payload, attachments: files });
   const requireEvidence = () => { if (evidenceRequired && !files.length) throw new Error("Attach the customer evidence before continuing."); };
 
   // Positive customer answers first collect the next phase's target dates, then submit in one request.
@@ -49,11 +52,8 @@ export default function StageActionPanel({ rfq, stage, components, onComplete, o
 
   return <div className="space-y-2.5">
     {error && <Alert>{error}</Alert>}
+    {!hasRemark && <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">Add at least one remark (use "Add remarks" below) before this stage can be completed.</p>}
 
-    <div>
-      <Caption>Remarks</Caption>
-      <TextAreaInput rows={2} placeholder="Add remarks for this stage (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
-    </div>
     <div>
       <Caption>{attachmentLabel(stage)}{evidenceRequired && <span className="text-rose-600"> *</span>}</Caption>
       <AttachmentField items={files} onChange={setFiles} />
@@ -64,17 +64,17 @@ export default function StageActionPanel({ rfq, stage, components, onComplete, o
     </div>}
 
     <div className="flex flex-wrap gap-2 pt-1">
-      {stage === "COSTING" && <PrimaryButton disabled={busy} onClick={submitCosting}>Submit Costing</PrimaryButton>}
+      {stage === "COSTING" && <PrimaryButton disabled={blocked} onClick={submitCosting}>Submit Costing</PrimaryButton>}
       {stage === "CUSTOMER_DECISION" && <>
-        <PrimaryButton disabled={busy} onClick={() => finish({ decision: "AWARDED" })}>Awarded</PrimaryButton>
-        <button type="button" disabled={busy} onClick={markLost} className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">Lost</button>
+        <PrimaryButton disabled={blocked} onClick={() => finish({ decision: "AWARDED" })}>Awarded</PrimaryButton>
+        <button type="button" disabled={blocked} onClick={markLost} className="rounded-lg border border-rose-300 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-50">Lost</button>
       </>}
-      {CUSTOMER_APPROVAL_STAGES.has(stage) && <PrimaryButton disabled={busy} onClick={() => finish({ approved: true })}>Customer Approved</PrimaryButton>}
-      {stage === "CUSTOMER_PO_RECEIVED" && <PrimaryButton disabled={busy} onClick={openPoDialog}>Submit</PrimaryButton>}
+      {CUSTOMER_APPROVAL_STAGES.has(stage) && <PrimaryButton disabled={blocked} onClick={() => finish({ approved: true })}>Customer Approved</PrimaryButton>}
+      {stage === "CUSTOMER_PO_RECEIVED" && <PrimaryButton disabled={blocked} onClick={openPoDialog}>Submit</PrimaryButton>}
 
       {PURCHASE_ITEM_STAGES.has(stage) && <GhostButton type="button" onClick={() => setDialog("purchase")}><PackagePlus size={13} className="mr-1 inline" />Add purchase items{purchaseItems.length ? ` (${purchaseItems.length})` : ""}</GhostButton>}
       {stage === "ACTUAL_BOM" && <GhostButton type="button" onClick={() => setDialog("bom")}><Boxes size={13} className="mr-1 inline" />Add BOM</GhostButton>}
-      {!CUSTOM_SUBMIT_STAGES.has(stage) && <PrimaryButton disabled={busy} onClick={markDone}>{stage === "MASS_PRODUCTION_HANDOVER" ? "Convert to Project" : "Mark Done"}</PrimaryButton>}
+      {!CUSTOM_SUBMIT_STAGES.has(stage) && <PrimaryButton disabled={blocked} onClick={markDone}>{stage === "MASS_PRODUCTION_HANDOVER" ? "Convert to Project" : "Mark Done"}</PrimaryButton>}
     </div>
 
     {dialog === "targets" && <TargetDatesDialog phase={NEXT_PHASE_AFTER[stage]} onClose={closeDialog} onConfirm={(target_dates) => submit({ ...pendingPayload, target_dates })} />}
