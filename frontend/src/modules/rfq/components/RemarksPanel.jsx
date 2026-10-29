@@ -5,14 +5,15 @@ import { Alert, PrimaryButton } from "../../../components/ui";
 import { TextAreaInput } from "./FormControls";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { formatDateTime, humanize } from "../utils/rfqFormat";
+import { rfqApiBase } from "./rfqConfig";
 
 /** One stage's remark thread. Remarks are append-only; with `canAdd` anyone who can open the RFQ can add as many as they need. */
-export default function RemarksPanel({ rfqId, stage, remarks, onAdded, canAdd = true }) {
+export default function RemarksPanel({ rfq, rfqId, stage, remarks, onAdded, canAdd = true }) {
   const [text, setText] = useState("");
   const { run, busy, error } = useAsyncAction();
 
   const submit = async () => {
-    const saved = await run(() => api.post(ENDPOINTS.RFQ.REMARKS(rfqId), { stage, text }));
+    const saved = await run(() => api.post(rfq?.parent_rfq ? `${rfqApiBase(rfq)}/remarks` : ENDPOINTS.RFQ.REMARKS(rfqId || rfq?._id), { stage, text }));
     if (!saved) return;
     setText("");
     await onAdded();

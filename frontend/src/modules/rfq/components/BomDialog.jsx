@@ -22,7 +22,7 @@ export default function BomDialog({ rfq, components, onClose, onChanged }) {
     if (!form.component_name.trim()) throw new Error("Component name is required.");
     if (!(perUnit >= 1)) throw new Error("Per-unit quantity must be at least 1.");
     await api.post(ENDPOINTS.RFQ.COMPONENTS, {
-      rfq_item: rfq._id, bom_stage: BOM_STAGE, component_name: form.component_name.trim(), component_description: form.component_description,
+      ...(rfq.parent_rfq ? { workflow_instance: rfq._id } : { rfq_item: rfq._id }), bom_stage: BOM_STAGE, component_name: form.component_name.trim(), component_description: form.component_description,
       per_unit_qty: perUnit, total_qty: Number(form.total_qty) || perUnit * poQty,
     });
     setForm(blankComponent());

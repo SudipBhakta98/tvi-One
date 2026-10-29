@@ -13,7 +13,7 @@ export const NPD_REPORT_DEPARTMENTS = ["projects", "rfq"];
 export const ALL_REPORT_DEPARTMENTS = [...NPD_REPORT_DEPARTMENTS, "purchase", "production", "warehouse", "dispatch", "finance"];
 export const reportDepartmentsFor = (role) => (DEPARTMENT_ROLES.NPD.includes(role) ? NPD_REPORT_DEPARTMENTS : ALL_REPORT_DEPARTMENTS);
 
-export const isProjectOwner = (user, rfq) => String(rfq.project_owner) === String(user._id);
+export const isProjectOwner = (user, rfq) => String(rfq.project_owner?._id || rfq.project_owner) === String(user._id);
 export const canUpdateRfq = (user, rfq) => EDIT_ROLES.includes(user.role) || isProjectOwner(user, rfq);
 export const permissionsFor = (user, rfq) => ({
   can_update: canUpdateRfq(user, rfq),

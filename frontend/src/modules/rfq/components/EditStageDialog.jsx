@@ -5,7 +5,7 @@ import { Alert, GhostButton, Modal, PrimaryButton } from "../../../components/ui
 import { FormField, TextInput } from "./FormControls";
 import AttachmentField from "./AttachmentField";
 import { useAsyncAction } from "../hooks/useAsyncAction";
-import { STAGES, attachmentLabel, stageLabel } from "./rfqConfig";
+import { STAGES, attachmentLabel, stageLabel, rfqApiBase } from "./rfqConfig";
 
 const dateInput = (value) => (value ? String(value).slice(0, 10) : "");
 
@@ -26,7 +26,7 @@ export default function EditStageDialog({ stage, rfq, entry, onClose, onSaved })
       if (hasTarget && targetDate) payload.target_date = targetDate;
       if (stage === "COSTING") payload.quoted_price = Number(price);
       if (stage === "CUSTOMER_PO_RECEIVED") Object.assign(payload, { po_number: poNumber, po_qty: Number(poQty) });
-      await api.put(`${ENDPOINTS.RFQ.BASE}/${rfq._id}/stages/${stage}`, payload);
+      await api.put(`${rfqApiBase(rfq)}/stages/${stage}`, payload);
     });
     if (saved) await onSaved();
   };

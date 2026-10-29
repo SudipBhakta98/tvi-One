@@ -1,9 +1,9 @@
 import express from "express";
 import {
-  createRfqItem, getAllRfqItems, getRfqItemById, updateRfqItem, deleteRfqItem, setTargets, transition, editStage, workflow, purchaseItems,
-  addRemark, getOwners, getFilterOptions, getRfqReport,
+  createRfqItem, getAllRfqItems, getRfqItemById, updateRfqItem, deleteRfqItem, getOwners, getFilterOptions, getRfqReport,
+  getRfqWorkflows, createRfqWorkflow, getRfqWorkflowInstance, transitionWorkflowInstance, addWorkflowRemark, editWorkflowStage, workflowPurchaseItems,
 } from "../controllers/rfqController.js";
-import { allowRoles, loadRfq, requireUpdater, CREATE_ROLES, EDIT_ROLES, DELETE_ROLES, REPORT_ROLES } from "../services/rfqPermissions.js";
+import { allowRoles, loadRfq, CREATE_ROLES, EDIT_ROLES, DELETE_ROLES, REPORT_ROLES } from "../services/rfqPermissions.js";
 
 const router = express.Router();
 
@@ -17,12 +17,13 @@ router.get("/report", allowRoles(...REPORT_ROLES), getRfqReport);
 
 router.post("/", allowRoles(...CREATE_ROLES), createRfqItem);
 router.get("/", getAllRfqItems);
-router.get("/:rfqItemID/workflow", workflow);
-router.post("/:rfqItemID/remarks", addRemark);
-router.post("/:rfqItemID/targets", requireUpdater, setTargets);
-router.post("/:rfqItemID/transition", transition);              // stage-level check lives in canActOnStage
-router.put("/:rfqItemID/stages/:stage", allowRoles(...EDIT_ROLES), editStage);   // correct a submitted stage
-router.put("/:rfqItemID/purchase-items", purchaseItems);        // stage-level check lives in canActOnStage
+router.get("/:rfqItemID/workflows", getRfqWorkflows);
+router.post("/:rfqItemID/workflows", createRfqWorkflow);
+router.get("/:rfqItemID/workflows/:workflowID", getRfqWorkflowInstance);
+router.post("/:rfqItemID/workflows/:workflowID/transition", transitionWorkflowInstance);
+router.post("/:rfqItemID/workflows/:workflowID/remarks", addWorkflowRemark);
+router.put("/:rfqItemID/workflows/:workflowID/purchase-items", workflowPurchaseItems);
+router.put("/:rfqItemID/workflows/:workflowID/stages/:stage", editWorkflowStage);
 router.get("/:rfqItemID", getRfqItemById);
 router.put("/:rfqItemID", allowRoles(...EDIT_ROLES), updateRfqItem);
 router.delete("/:rfqItemID", allowRoles(...DELETE_ROLES), deleteRfqItem);

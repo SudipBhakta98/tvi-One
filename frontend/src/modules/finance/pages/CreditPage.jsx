@@ -236,7 +236,12 @@ export default function CreditPage() {
             Overview, unallocated balance, and allocation logs
           </p>
         </div>
-
+        <button
+          onClick={() => setIsCreateModalOpen(true)}
+          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition-colors self-start sm:self-auto"
+        >
+          + Create Credit Note
+        </button>
       </div>
 
       {/* Metric Cards */}

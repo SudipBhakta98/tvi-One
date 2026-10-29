@@ -7,12 +7,11 @@ import { FormField, TextInput, TextAreaInput } from "../components/FormControls"
 import RfqFullPage from "../components/RfqFullPage";
 import AttachmentField from "../components/AttachmentField";
 import ProjectOwnerSelect from "../components/ProjectOwnerSelect";
-import { STAGES, TARGET_PHASES, blankMain, blankSub, emptyStageSchedule, errorMessage } from "../components/rfqConfig";
+import { blankMain, blankSub, errorMessage } from "../components/rfqConfig";
 
 const todayInput = () => new Date().toISOString().slice(0, 10);
-const initialStages = STAGES.filter(([stage]) => TARGET_PHASES.INITIAL.includes(stage));
 
-const toFormPart = (part) => ({ ...blankMain(), ...part, sub_parts: (part.sub_parts || []).map((sub) => ({ ...blankSub(), ...sub })) });
+const toFormPart = (part) => ({ ...blankMain(), ...part, drawing_attachments: part.drawing_attachments || [], sub_parts: (part.sub_parts || []).map((sub) => ({ ...blankSub(), ...sub, drawing_attachments: sub.drawing_attachments || [] })) });
 const toFormDetails = (rfq) => ({
   rfq_number: rfq.rfq_number,
   customer: rfq.customer,
@@ -26,7 +25,6 @@ const toFormDetails = (rfq) => ({
 export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
   const isEdit = Boolean(rfq);
   const [form, setForm] = useState(() => (isEdit ? toFormDetails(rfq) : { rfq_number: "", customer: "", project_owner: "", project_name: "", rfq_dated: todayInput(), description: "" }));
-  const [targets, setTargets] = useState({});
   const [mainParts, setMainParts] = useState(() => (rfq?.main_parts?.length ? rfq.main_parts.map(toFormPart) : [blankMain()]));
   const [attachments, setAttachments] = useState([]);
   const [error, setError] = useState("");
@@ -60,7 +58,6 @@ export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
       const response = await api.post(ENDPOINTS.RFQ.BASE, {
         ...payload,
         stage_attachments: attachments.length ? { CUSTOMER_RFQ_RECEIVED: attachments } : {},
-        stage_schedule: emptyStageSchedule().map((item) => ({ ...item, target_date: targets[item.stage] || null })),
       });
       onCreated(response.data.rfqItem._id);
     } catch (e) {
@@ -69,7 +66,7 @@ export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
     }
   };
 
-  return <RfqFullPage title={isEdit ? `Edit RFQ ${rfq.rfq_number}` : "Create New RFQ"} subtitle={isEdit ? "Update RFQ details and part structure" : "RFQ details → attachments → initial target dates → part structure"} onClose={onClose}>
+  return <RfqFullPage title={isEdit ? `Edit RFQ ${rfq.rfq_number}` : "Create New RFQ"} subtitle={isEdit ? "Update RFQ details and part structure" : "Create the RFQ first. Start a batch workflow from its detail page when parts are ready."} onClose={onClose}>
     <form onSubmit={submit} className="space-y-3">
       {error && <Alert>{error}</Alert>}
 
@@ -88,15 +85,8 @@ export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
         <AttachmentField items={attachments} onChange={setAttachments} />
       </Panel>}
 
-      {!isEdit && <Panel title="3 · Initial Target Dates" toolbar={<span className="text-xs text-slate-600">Later phases ask for their dates when the customer awards / approves</span>}>
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {initialStages.map(([stage, label]) => <FormField key={stage} label={label}>
-            <TextInput type="date" required value={targets[stage] || ""} onChange={(e) => setTargets((current) => ({ ...current, [stage]: e.target.value }))} />
-          </FormField>)}
-        </div>
-      </Panel>}
 
-      <Panel title={`${isEdit ? 2 : 4} · Part Structure`} toolbar={<GhostButton type="button" onClick={() => setMainParts((parts) => [...parts, blankMain()])}><Plus size={14} className="mr-1 inline" />Add Main Part</GhostButton>}>
+      <Panel title={`${isEdit ? 2 : 3} · Part Structure`} toolbar={<GhostButton type="button" onClick={() => setMainParts((parts) => [...parts, blankMain()])}><Plus size={14} className="mr-1 inline" />Add Main Part</GhostButton>}>
         <p className="mb-3 text-xs text-slate-600">One RFQ has many main parts; each main part can have any number of sub parts (optional).</p>
         <div className="space-y-3">
           {mainParts.map((part, mainIndex) => <div key={mainIndex} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -109,6 +99,9 @@ export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
               <FormField label="Annual Volume"><TextInput type="number" min="1" required value={part.volume_per_annum_nos} onChange={(e) => updateMain(mainIndex, { volume_per_annum_nos: e.target.value })} /></FormField>
               <FormField label="Description"><TextInput value={part.description} onChange={(e) => updateMain(mainIndex, { description: e.target.value })} /></FormField>
             </div>
+            <div className="rounded-md border border-slate-200 bg-white p-2">
+              <FormField label="Main Part Drawings"><AttachmentField items={part.drawing_attachments || []} onChange={(items) => updateMain(mainIndex, { drawing_attachments: items })} /></FormField>
+            </div>
 
             <div className="space-y-2 border-t border-slate-200 pt-2">
               <div className="flex items-center justify-between">
@@ -120,6 +113,9 @@ export default function RfqCreatePage({ rfq, onClose, onCreated, onSaved }) {
                 <FormField label="Description"><TextInput value={sub.description} onChange={(e) => updateSub(mainIndex, subIndex, { description: e.target.value })} /></FormField>
                 <FormField label="Qty"><TextInput type="number" min="1" value={sub.qty_per_main_part} onChange={(e) => updateSub(mainIndex, subIndex, { qty_per_main_part: e.target.value })} /></FormField>
                 <button type="button" onClick={() => updateMain(mainIndex, { sub_parts: part.sub_parts.filter((_, j) => j !== subIndex) })} aria-label="Remove sub part" className="mb-2 text-slate-600 hover:text-rose-600"><Trash2 size={15} /></button>
+                <div className="md:col-span-4 rounded-md border border-slate-200 bg-white p-2">
+                  <FormField label={`Drawings · ${sub.sub_part_no || `Sub Part ${subIndex + 1}`}`}><AttachmentField items={sub.drawing_attachments || []} onChange={(items) => updateSub(mainIndex, subIndex, { drawing_attachments: items })} /></FormField>
+                </div>
               </div>)}
             </div>
           </div>)}

@@ -22,12 +22,6 @@ import RfqDetailPage from "./RfqDetailPage";
 import useRfqFilters from "../hooks/useRfqFilters";
 import { RFQ_CREATE_ROLES, formatMoney } from "../components/rfqConfig";
 
-const OPEN_STATUSES = [
-  "ACTIVE",
-  "WAITING_FOR_APPROVAL",
-  "ON_HOLD",
-];
-
 const DECIDED_STATUSES = [
   "AWARDED",
   "LOST",
@@ -90,17 +84,17 @@ export default function RfqPage() {
   const stats = useMemo(() => {
     const quoted = filteredRows.reduce(
       (sum, r) =>
-        sum + Number(r.costing?.quoted_price || 0),
+        sum + Number(r.total_quoted_value || 0),
       0
     );
 
     const quotedCount = filteredRows.filter(
       (r) =>
-        Number(r.costing?.quoted_price || 0) > 0
+        Number(r.total_quoted_value || 0) > 0
     ).length;
 
     const awarded = filteredRows.filter(
-      (r) => r.rfq_status === "AWARDED"
+      (r) => Number(r.total_awarded_value || 0) > 0
     );
 
     const decided = filteredRows.filter(
@@ -111,20 +105,20 @@ export default function RfqPage() {
       total: filteredRows.length,
 
       active: filteredRows.filter(
-        (r) => OPEN_STATUSES.includes(r.rfq_status)
+        (r) => Number(r.workflow_count || 0) > 0 && !["AWARDED", "LOST"].includes(r.rfq_status)
       ).length,
 
       awarded: awarded.length,
 
       completed: filteredRows.filter(
-        (r) => r.current_stage === "COMPLETED"
+        (r) => r.workflow_count > 0 && r.current_stage === "COMPLETED"
       ).length,
 
       quoted,
 
       awardedValue: awarded.reduce(
         (sum, r) =>
-          sum + Number(r.costing?.quoted_price || 0),
+          sum + Number(r.total_awarded_value || 0),
         0
       ),
 

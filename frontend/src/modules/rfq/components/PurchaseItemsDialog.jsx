@@ -4,19 +4,20 @@ import { ENDPOINTS } from "../../../services/endpoints";
 import { Alert, GhostButton, Modal, PrimaryButton } from "../../../components/ui";
 import { FormField, TextInput } from "./FormControls";
 import { useAsyncAction } from "../hooks/useAsyncAction";
+import { rfqApiBase } from "./rfqConfig";
 import { useRows } from "../hooks/useRows";
 import { stageLabel } from "./rfqConfig";
 
 const blankItem = () => ({ item_name: "", quantity: 1, remarks: "" });
 
 /** Optional purchase items for a Capex / Tooling stage. Saving with no items is valid. */
-export default function PurchaseItemsDialog({ rfqId, stage, items, onClose, onSaved }) {
+export default function PurchaseItemsDialog({ rfq, rfqId, stage, items, onClose, onSaved }) {
   const initialRows = items.length ? items.map(({ item_name, quantity, remarks }) => ({ item_name, quantity, remarks })) : [blankItem()];
   const { rows, update, add, remove } = useRows(blankItem, initialRows);
   const { run, busy, error } = useAsyncAction();
 
   const save = () => run(async () => {
-    await api.put(`${ENDPOINTS.RFQ.BASE}/${rfqId}/purchase-items`, { stage, items: rows });
+    await api.put(`${rfq?.parent_rfq ? rfqApiBase(rfq) : `${ENDPOINTS.RFQ.BASE}/${rfqId || rfq?._id}`}/purchase-items`, { stage, items: rows });
     await onSaved();
     onClose();
   });

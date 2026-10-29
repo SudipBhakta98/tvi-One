@@ -8,7 +8,7 @@ import BomDialog from "./BomDialog";
 import PoDialog from "./PoDialog";
 import PurchaseItemsDialog from "./PurchaseItemsDialog";
 import TargetDatesDialog from "./TargetDatesDialog";
-import { CUSTOMER_APPROVAL_STAGES, CUSTOMER_EVIDENCE_STAGES, NEXT_PHASE_AFTER, PURCHASE_ITEM_STAGES, attachmentLabel } from "./rfqConfig";
+import { CUSTOMER_APPROVAL_STAGES, CUSTOMER_EVIDENCE_STAGES, NEXT_PHASE_AFTER, PURCHASE_ITEM_STAGES, attachmentLabel, hasTargetDate } from "./rfqConfig";
 
 const CAPEX_COMPLETE_STATUS = "APPROVED";
 const LOST_CONFIRMATION = "Mark this RFQ as Lost? The RFQ will be closed.";
@@ -21,19 +21,22 @@ const Caption = ({ children }) => <div className="mb-1 text-xs font-semibold tex
 export default function StageActionPanel({ rfq, stage, components, onComplete, onReload }) {
   const [files, setFiles] = useState([]);
   const [price, setPrice] = useState("");
+  const existingTargetDate = rfq.stage_schedule?.find((entry) => entry.stage === stage)?.target_date;
+  const needsTargetDate = hasTargetDate(stage) && !existingTargetDate;
+  const [targetDate, setTargetDate] = useState("");
   const [dialog, setDialog] = useState(null); // "targets" | "po" | "purchase" | "bom"
   const [pendingPayload, setPendingPayload] = useState(null);
   const { run, busy, error } = useAsyncAction();
 
   // The server refuses to complete a stage that has no remark, so the buttons wait for one (added with the "Add remarks" button).
   const hasRemark = (rfq.stage_remarks || []).some((remark) => remark.stage === stage);
-  const blocked = busy || !hasRemark;
+  const blocked = busy || !hasRemark || (needsTargetDate && !targetDate);
 
   const evidenceRequired = CUSTOMER_EVIDENCE_STAGES.has(stage);
   const purchaseItems = (rfq.purchase_items || []).filter((item) => item.stage === stage);
   const closeDialog = () => setDialog(null);
 
-  const submit = (payload) => onComplete(stage, { ...payload, attachments: files });
+  const submit = (payload) => onComplete(stage, { ...payload, ...(needsTargetDate && targetDate ? { target_date: targetDate } : {}), attachments: files });
   const requireEvidence = () => { if (evidenceRequired && !files.length) throw new Error("Attach the customer evidence before continuing."); };
 
   // Positive customer answers first collect the next phase's target dates, then submit in one request.
@@ -53,6 +56,7 @@ export default function StageActionPanel({ rfq, stage, components, onComplete, o
   return <div className="space-y-2.5">
     {error && <Alert>{error}</Alert>}
     {!hasRemark && <p className="rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-800">Add at least one remark (use "Add remarks" below) before this stage can be completed.</p>}
+    {needsTargetDate && <div><Caption>Target Date <span className="text-rose-600">*</span></Caption><TextInput type="date" required value={targetDate} onChange={(event) => setTargetDate(event.target.value)} className="w-full" /><p className="mt-1 text-[11px] text-slate-500">Set this stage's target date before submitting it.</p></div>}
 
     <div>
       <Caption>{attachmentLabel(stage)}{evidenceRequired && <span className="text-rose-600"> *</span>}</Caption>
@@ -79,7 +83,7 @@ export default function StageActionPanel({ rfq, stage, components, onComplete, o
 
     {dialog === "targets" && <TargetDatesDialog phase={NEXT_PHASE_AFTER[stage]} onClose={closeDialog} onConfirm={(target_dates) => submit({ ...pendingPayload, target_dates })} />}
     {dialog === "po" && <PoDialog onClose={closeDialog} onConfirm={submit} />}
-    {dialog === "purchase" && <PurchaseItemsDialog rfqId={rfq._id} stage={stage} items={purchaseItems} onClose={closeDialog} onSaved={onReload} />}
+    {dialog === "purchase" && <PurchaseItemsDialog rfq={rfq} rfqId={rfq._id} stage={stage} items={purchaseItems} onClose={closeDialog} onSaved={onReload} />}
     {dialog === "bom" && <BomDialog rfq={rfq} components={components} onClose={closeDialog} onChanged={onReload} />}
   </div>;
 }

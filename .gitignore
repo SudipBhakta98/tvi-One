@@ -1,8 +1,21 @@
+# Dependencies
 node_modules/
+
+# Environment files
 .env
+*.env*
 backend/.env
+frontend/.env
+
+# Build and distribution directories
 dist/
+
+# OS generated files
 .DS_Store
+
+# Logs
 npm-debug.log*
-.env*
-frontend/.env*
+
+# Compressed files
+*.zip
+**.zip

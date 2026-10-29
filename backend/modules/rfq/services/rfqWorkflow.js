@@ -1,4 +1,5 @@
 import RfqItem from "../models/rfqItemModel.js";
+import RfqWorkflow from "../models/rfqWorkflowModel.js";
 import Component from "../models/componentModel.js";
 import convertRfqToProject from "./convertRfqToProject.js";
 import { ROLES } from "../../../constants/roles.js";
@@ -63,7 +64,7 @@ export const getStageStatus = (rfq, stage, now = new Date()) => {
 };
 
 const allowedTargetPhase = (currentStage) => {
-  // Initial targets are supplied only during RFQ creation. They are not editable here.
+  // The initial target is supplied when a batch workflow starts; later target-date stages request their target when they become active.
   if (TARGET_PHASES.PROTOTYPE.includes(currentStage)) return "PROTOTYPE";
   if (TARGET_PHASES.PILOT.includes(currentStage)) return "PILOT";
   if (TARGET_PHASES.MASS_PRODUCTION.includes(currentStage)) return "MASS_PRODUCTION";
@@ -87,8 +88,8 @@ const parsePhaseTargets = (phase, targetDates) => {
   }));
 };
 
-export const setPhaseTargets = async (rfqId, targetDates) => {
-  const rfq = await RfqItem.findById(rfqId);
+export const setPhaseTargets = async (rfqId, targetDates, Model = RfqItem) => {
+  const rfq = await Model.findById(rfqId);
   if (!rfq) throw new Error("RFQ not found");
   const phase = allowedTargetPhase(rfq.current_stage);
   if (!phase) throw new Error("No target-date phase is currently open");
@@ -161,10 +162,10 @@ const completionPayload = (rfq, stage, data, targets) => {
   return { updates, now };
 };
 
-export const transitionRfq = async (rfqId, stage, data, user) => {
+export const transitionRfq = async (rfqId, stage, data, user, Model = RfqItem) => {
   if (!STAGES.includes(stage)) throw new Error("Invalid workflow stage");
-  const rfq = await RfqItem.findById(rfqId);
-  if (!rfq) throw new Error("RFQ not found");
+  const rfq = await Model.findById(rfqId);
+  if (!rfq) throw new Error("RFQ/workflow not found");
   if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot perform ${stage}`);
   if (rfq.current_stage !== stage) throw new Error(`Current stage is ${label(String(rfq.current_stage))}`);
 
@@ -173,7 +174,7 @@ export const transitionRfq = async (rfqId, stage, data, user) => {
   }
   if (!rfq.stage_remarks?.some((remark) => remark.stage === stage)) throw new Error("Add at least one remark before completing this stage");
 
-  if (TARGET_PHASES.INITIAL.includes(stage) && !getScheduleEntry(rfq, stage)?.target_date) {
+  if (TARGET_DATE_STAGES.has(stage) && !getScheduleEntry(rfq, stage)?.target_date && !data.target_date) {
     throw new Error(`Set the target date for ${label(stage)} before completing this stage`);
   }
   if (stage === "COSTING" && (!Number.isFinite(Number(data.quoted_price)) || Number(data.quoted_price) <= 0)) throw new Error("Quoted value is required and must be greater than zero");
@@ -181,10 +182,16 @@ export const transitionRfq = async (rfqId, stage, data, user) => {
   if (stage === "CUSTOMER_DECISION" && !["AWARDED", "LOST"].includes(data.decision)) throw new Error("Customer decision must be AWARDED or LOST");
   if (stage === "CUSTOMER_APPROVAL_PILOT" && !data.approved) throw new Error("Customer approval for pilot building is required");
   if (stage === "CUSTOMER_APPROVAL_MASS_PRODUCTION" && !data.approved) throw new Error("Customer approval for mass production is required");
-  if (stage === "ACTUAL_BOM" && await Component.countDocuments({ rfq_item: rfq._id, bom_stage: "FINAL_BOM" }) === 0) throw new Error("Define at least one final BOM component before completing this stage");
+  if (stage === "ACTUAL_BOM") {
+    const bomFilter = Model === RfqWorkflow ? { workflow_instance: rfq._id, bom_stage: "FINAL_BOM" } : { rfq_item: rfq._id, bom_stage: "FINAL_BOM" };
+    if (await Component.countDocuments(bomFilter) === 0) throw new Error("Define at least one final BOM component before completing this stage");
+  }
 
   const opensNextPhase = NEXT_PHASE_AFTER[stage] && data.decision !== "LOST";
   const targets = opensNextPhase ? parsePhaseTargets(NEXT_PHASE_AFTER[stage], data.target_dates) : new Map();
+  if (TARGET_DATE_STAGES.has(stage) && !getScheduleEntry(rfq, stage)?.target_date && data.target_date) {
+    targets.set(stage, toDate(data.target_date, "Target date"));
+  }
 
   const { updates, now } = completionPayload(rfq, stage, data, targets);
   if (Array.isArray(data.attachments) && data.attachments.length) {
@@ -195,15 +202,15 @@ export const transitionRfq = async (rfqId, stage, data, user) => {
   await rfq.save();
 
   let project = null;
-  if (stage === "MASS_PRODUCTION_HANDOVER") project = await convertRfqToProject(rfq);
+  if (stage === "MASS_PRODUCTION_HANDOVER") project = await convertRfqToProject(rfq, { workflowInstance: Model === RfqWorkflow });
   return { rfq, project };
 };
 
 // Corrects an already submitted stage: its target / submit date, its attachments, and the quoted value or PO of the stages that have one.
 // Marks the stage as updated so the change is traceable (stage history updatedAt).
-export const editStage = async (rfqId, stage, data) => {
+export const editStage = async (rfqId, stage, data, Model = RfqItem) => {
   if (!STAGES.includes(stage)) throw new Error("Invalid workflow stage");
-  const rfq = await RfqItem.findById(rfqId);
+  const rfq = await Model.findById(rfqId);
   if (!rfq) throw new Error("RFQ not found");
   const entry = getScheduleEntry(rfq, stage);
   if (!entry?.completed_date) throw new Error("Only a submitted stage can be edited");
@@ -232,9 +239,9 @@ export const editStage = async (rfqId, stage, data) => {
 };
 
 // Replaces the purchase items of one Capex / Tooling stage. Items are optional, so an empty list is valid.
-export const savePurchaseItems = async (rfqId, stage, items, user) => {
+export const savePurchaseItems = async (rfqId, stage, items, user, Model = RfqItem) => {
   if (!PURCHASE_ITEM_STAGES.has(stage)) throw new Error("Purchase items are not used at this stage");
-  const rfq = await RfqItem.findById(rfqId);
+  const rfq = await Model.findById(rfqId);
   if (!rfq) throw new Error("RFQ not found");
   if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot edit ${label(stage)}`);
   if (rfq.current_stage !== stage) throw new Error("Purchase items can only be edited while this stage is open");
@@ -248,11 +255,12 @@ export const savePurchaseItems = async (rfqId, stage, items, user) => {
   return rfq;
 };
 
-export const getWorkflowSummary = async (rfqId) => {
-  const rfq = await RfqItem.findById(rfqId).populate("stage_history.user", "name email role").lean();
+export const getWorkflowSummary = async (rfqId, Model = RfqItem) => {
+  const rfq = await Model.findById(rfqId).populate("stage_history.user", "name email role").lean();
   if (!rfq) return null;
   // After handover the components are re-owned by the Project, so read both owners.
-  const owners = [{ rfq_item: rfqId }, ...(rfq.linked_project ? [{ project: rfq.linked_project }] : [])];
+  const owners = Model === RfqWorkflow ? [{ workflow_instance: rfqId }] : [{ rfq_item: rfqId }];
+  if (rfq.linked_project) owners.push({ project: rfq.linked_project });
   const components = await Component.find({ $or: owners }).sort({ bom_stage: 1, createdAt: 1 }).lean();
   const stage_schedule = (rfq.stage_schedule || []).map((item) => ({ ...item, status: getStageStatus(rfq, item.stage) }));
   return { rfq, components, stage_schedule, can_set_targets: canSetTargetsForCurrentPhase(rfq) };

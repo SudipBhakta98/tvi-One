@@ -125,3 +125,28 @@ Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Produc
 ## Remarks rule and stage editing
 - A stage cannot be completed until it has at least one remark (enforced in `transitionRfq`); remarks can be added any number of times from the current stage's "Add remarks" button.
 - A submitted stage can be corrected with **Edit** (NPD Manager, Admin, Super User): target date, submit date, attachments, and the quoted value (Costing) or PO number / quantity (Customer PO). The stage's Updated At changes, so View details shows "Edited After Submit: Yes".
+
+## 10. Part drawings and independent workflow instances (update)
+
+- Main parts and sub-parts now each support `drawing_attachments[]`. The existing attachment picker is reused, so the current UI pattern stays unchanged. As with stage attachments, selected local files are currently stored as metadata only; use links for immediately openable drawings until the application's file-upload integration is wired in.
+- The RFQ detail page now has a **Workflow Instances** section. Create an instance by naming it and selecting one or more main parts and/or sub-parts. Each instance is stored in the separate MongoDB `rfq_workflows` collection and gets its own 20-stage lifecycle, stage schedule, remarks, attachments, costing, PO data, BOM and project conversion.
+- The workflow instance detail view reuses the existing 20-stage grid and dialog patterns. Its stage, remark, edit, purchase-item and BOM actions use workflow-specific endpoints and do not update the parent RFQ's lifecycle.
+- If the RFQ's part descriptions or drawings are updated later, selected part snapshots are refreshed in existing workflow instances without resetting their progress/history. A newly added part is not silently injected into an already-running workflow; create another workflow and select that part.
+- Workflow endpoints: `GET /:rfqItemID/workflows`, `POST /:rfqItemID/workflows`, `GET /:rfqItemID/workflows/:workflowID`, `POST /:rfqItemID/workflows/:workflowID/transition`, `POST /:rfqItemID/workflows/:workflowID/remarks`, `PUT /:rfqItemID/workflows/:workflowID/stages/:stage`, and `PUT /:rfqItemID/workflows/:workflowID/purchase-items`.
+- Workflow BOM lines use `workflow_instance` in the existing Components collection. At mass-production handover, only that workflow's components are handed over to its generated Project.
+- Existing RFQ records remain valid. Mongoose will create the `rfq_workflows` collection when first used; no destructive migration is included. Take a database backup before deploying any schema/controller update.
+
+
+## Batch workflow model (updated)
+
+- Creating an RFQ is intake-only. It saves customer/project details, the part hierarchy, drawings, and RFQ-level attachments; it does not initialize stage targets/history or start a lifecycle.
+- Open an RFQ to see consolidated values and its batch-workflow register. Start a workflow only through **Create Batch Workflow** after selecting available main parts and/or subparts and supplying the initial target date.
+- The initial target date becomes the target date for the first active stage, `DOCUMENT_REVIEW`. `CUSTOMER_RFQ_RECEIVED` is recorded as completed when the user explicitly starts the workflow. Each later target-date stage asks for its own target date when that stage becomes active; customer/event stages remain customer-driven. The existing 20-stage process and stage gates remain in place.
+- Main-part selection and subpart selection are independent. A main part or subpart already assigned to any workflow is disabled in the UI and rejected by the API if submitted again. Different, unassigned subparts under the same parent main part can be assigned to other workflows.
+- Workflow numbers are generated as `<RFQ number>-WF-001`, `<RFQ number>-WF-002`, etc. Every workflow owns its own stage schedule, progress, remarks, attachments, costing, PO information, and BOM.
+- RFQ register values are consolidated from child workflows. Quoted value is the sum of workflow quotes; awarded value is the sum of awarded workflow quote × PO quantity (or × 1 when a PO quantity is not recorded yet).
+- Existing direct RFQ stage-mutation routes have been removed. Stage actions are available only under `/:rfqItemID/workflows/:workflowID/...`.
+
+### Workflow creation request
+
+`POST /:rfqItemID/workflows` accepts `{ initial_target_date, selected_parts }`, where each selection has `main_part_id`, `main_part_selected` (boolean), and `sub_part_ids` (array). The API validates part ownership, rejects duplicate assignments, and requires a valid initial target date.

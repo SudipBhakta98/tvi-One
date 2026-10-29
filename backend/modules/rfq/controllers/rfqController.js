@@ -1,10 +1,11 @@
 import RfqItem from "../models/rfqItemModel.js";
+import RfqWorkflow from "../models/rfqWorkflowModel.js";
 import Component from "../models/componentModel.js";
 import User from "../../auth/userModel.js";
 import { ROLES } from "../../../constants/roles.js";
-import { CURRENT_STAGE, RFQ_STATUS, WORKFLOW_STAGES } from "../../../constants/rfqEnums.js";
+import { WORKFLOW_STAGES } from "../../../constants/rfqEnums.js";
 import { STAGES, TARGET_DATE_STAGES, getStageStatus, transitionRfq, editStage as editStageRecord, getWorkflowSummary, setPhaseTargets, savePurchaseItems } from "../services/rfqWorkflow.js";
-import { rfqScope, permissionsFor, reportDepartmentsFor } from "../services/rfqPermissions.js";
+import { rfqScope, permissionsFor, reportDepartmentsFor, canUpdateRfq } from "../services/rfqPermissions.js";
 import { currentStageInfo } from "../services/rfqStageSummary.js";
 import { buildRfqReport } from "../services/rfqReport.js";
 
@@ -32,7 +33,7 @@ const availableMonthKeys = async (scope) => {
   return months.map(({ _id }) => _id);
 };
 
-const FILTER_FIELDS = ["customer", "project_name", "project_owner", "current_stage", "rfq_status"];
+const FILTER_FIELDS = ["customer", "project_name", "project_owner"];
 const LIST_FIELDS = "rfq_number customer project_owner project_lead project_name rfq_dated rfq_target_date stage_schedule main_parts main_part_no sub_part_no volume_per_annum_nos rfq_status current_stage costing stage_attachments stage_remarks createdAt updatedAt";
 const humanize = (value) => value.replaceAll("_", " ");
 const toOptions = (values) => values.filter(Boolean).sort((a, b) => a.localeCompare(b)).map((value) => ({ label: value, value }));
@@ -112,14 +113,18 @@ export const createRfqItem = async (req, res) => {
     const owner = await resolveOwner(body.project_owner);
     body.project_owner = owner._id;
     body.project_lead = owner.name;
-    body.stage_schedule = normalizeStageSchedule(body.stage_schedule);
-    body.stage_schedule = body.stage_schedule.map((item) => item.stage === "CUSTOMER_RFQ_RECEIVED" ? { ...item, completed_date: new Date() } : item);
+    // RFQ creation is intake only: do not collect stage targets, initialize stage history, or start the workflow.
+    delete body.stage_schedule;
+    delete body.stage_history;
+    delete body.current_stage;
+    delete body.workflow_started;
     const rfqItem = await RfqItem.create({
       ...body,
-      current_stage: "DOCUMENT_REVIEW",
-      stage_history: [{
-        stage: "CUSTOMER_RFQ_RECEIVED", action: "COMPLETED", user: req.user._id, note: "RFQ received", completedAt: new Date(),
-      }],
+      workflow_started: false,
+      current_stage: null,
+      stage_schedule: [],
+      stage_history: [],
+      stage_remarks: [],
     });
     res.status(201).json({ success: true, message: "RFQ created", rfqItem });
   } catch (err) { res.status(400).json({ success: false, error: err.message }); }
@@ -140,17 +145,46 @@ export const getAllRfqItems = async (req, res) => {
       .select(LIST_FIELDS)
       .populate("project_owner", "name")
       .sort({ createdAt: -1 }).lean();
-    res.json(rows.map(({ stage_remarks, ...row }) => {
-      const { due_date, status, latest_remark } = currentStageInfo({ ...row, stage_remarks });
+    const workflowRows = await RfqWorkflow.find({ parent_rfq: { $in: rows.map((row) => row._id) } })
+      .select("parent_rfq main_parts selected_parts current_stage rfq_status costing purchase_order stage_remarks stage_schedule")
+      .lean();
+    const byRfq = new Map();
+    for (const wf of workflowRows) {
+      const key = String(wf.parent_rfq);
+      const current = byRfq.get(key) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED" };
+      current.workflows += 1;
+      const quote = Number(wf.costing?.quoted_price || 0);
+      current.quoted += quote;
+      if (wf.rfq_status === "AWARDED") current.awarded += Number(wf.purchase_order?.po_qty || 1) * quote;
+      const remark = (wf.stage_remarks || []).slice(-1)[0];
+      if (remark && (!current.latest_remark || new Date(remark.createdAt) > new Date(current.latest_remark.createdAt))) current.latest_remark = remark;
+      current.current_stage = wf.current_stage;
+      current.rfq_status = wf.rfq_status || current.rfq_status;
+      byRfq.set(key, current);
+    }
+    let responseRows = rows.map(({ stage_remarks, ...row }) => {
+      const wf = byRfq.get(String(row._id)) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED" };
       return {
         ...row,
         project_owner_name: row.project_owner?.name || row.project_lead,
-        current_due_date: due_date,
-        current_stage_status: status,
-        latest_remark,
-        stage_schedule: (row.stage_schedule || []).map((item) => ({ ...item, status: getStageStatus(row, item.stage) })),
+        main_part_qty: (row.main_parts || []).length,
+        sub_part_qty: (row.main_parts || []).reduce((n, part) => n + (part.sub_parts || []).length, 0),
+        total_quoted_value: wf.quoted,
+        total_awarded_value: wf.awarded,
+        workflow_count: wf.workflows,
+        latest_remark: wf.latest_remark,
+        current_stage: wf.workflows ? wf.current_stage : null,
+        rfq_status: wf.workflows ? wf.rfq_status : "NOT_STARTED",
+        current_due_date: null,
+        current_stage_status: "NOT_STARTED",
+        stage_schedule: [],
       };
-    }));
+    });
+    const requestedStages = String(req.query.current_stage || "").split(MULTI_VALUE_SEPARATOR).filter(Boolean);
+    const requestedStatuses = String(req.query.rfq_status || "").split(MULTI_VALUE_SEPARATOR).filter(Boolean);
+    if (requestedStages.length) responseRows = responseRows.filter((row) => requestedStages.includes(row.current_stage || "NOT_STARTED"));
+    if (requestedStatuses.length) responseRows = responseRows.filter((row) => requestedStatuses.includes(row.rfq_status));
+    res.json(responseRows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
@@ -158,9 +192,11 @@ export const getAllRfqItems = async (req, res) => {
 export const getFilterOptions = async (req, res) => {
   try {
     const scope = rfqScope(req.user);
-    const [customers, projectNames, ownerIds] = await Promise.all(
-      ["customer", "project_name", "project_owner"].map((field) => RfqItem.distinct(field, scope)),
-    );
+    const [customers, projectNames, ownerIds, workflowStages, workflowStatuses] = await Promise.all([
+      ...["customer", "project_name", "project_owner"].map((field) => RfqItem.distinct(field, scope)),
+      RfqWorkflow.distinct("current_stage"),
+      RfqWorkflow.distinct("rfq_status"),
+    ]);
     const owners = await User.find({ _id: { $in: ownerIds } }).select("name").sort({ name: 1 }).lean();
     const monthKeys = await availableMonthKeys(scope);
     res.json({
@@ -169,8 +205,8 @@ export const getFilterOptions = async (req, res) => {
       customer: toOptions(customers),
       project_name: toOptions(projectNames),
       project_owner: owners.map((owner) => ({ label: owner.name, value: String(owner._id) })),
-      current_stage: CURRENT_STAGE.map((stage) => ({ label: humanize(stage), value: stage })),
-      rfq_status: RFQ_STATUS.map((status) => ({ label: humanize(status), value: status })),
+      current_stage: [{ label: "Not Started", value: "NOT_STARTED" }, ...workflowStages.filter(Boolean).map((stage) => ({ label: humanize(stage), value: stage }))],
+      rfq_status: [...new Set([...workflowStatuses.filter(Boolean), "NOT_STARTED"])].map((status) => ({ label: humanize(status), value: status })),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -212,6 +248,28 @@ export const updateRfqItem = async (req, res) => {
       { new: true, runValidators: true, arrayFilters: [{ "entry.stage": RFQ_RECEIVED_STAGE }] },
     );
     if (!row) return res.status(404).json({ error: "RFQ not found" });
+    // Keep selected-part snapshots current when drawings/descriptions arrive later, without
+    // touching each workflow's independent stage state, remarks, or history.
+    if (body.main_parts) {
+      const workflows = await RfqWorkflow.find({ parent_rfq: row._id });
+      for (const instance of workflows) {
+        const refreshed = [];
+        for (const selection of instance.selected_parts || []) {
+          const sourcePart = row.main_parts.id(selection.main_part_id);
+          if (!sourcePart) {
+            const oldPart = instance.main_parts.id(selection.main_part_id);
+            if (oldPart) refreshed.push(oldPart.toObject());
+            continue;
+          }
+          const part = sourcePart.toObject();
+          const subIds = (selection.sub_part_ids || []).map(String);
+          if (subIds.length) part.sub_parts = part.sub_parts.filter((sub) => subIds.includes(String(sub._id)));
+          refreshed.push(part);
+        }
+        instance.main_parts = refreshed;
+        await instance.save();
+      }
+    }
     res.json({ success: true, rfqItem: row });
   } catch (e) { res.status(400).json({ error: e.message }); }
 };
@@ -220,8 +278,11 @@ export const deleteRfqItem = async (req, res) => {
   try {
     const row = await RfqItem.findById(req.params.rfqItemID).select("linked_project");
     if (!row) return res.status(404).json({ error: "RFQ not found" });
-    if (row.linked_project) return res.status(409).json({ success: false, error: "This RFQ was converted to a project and cannot be deleted" });
-    await Component.deleteMany({ rfq_item: row._id }); // its BOM / prototype components go with it
+    const convertedWorkflow = await RfqWorkflow.exists({ parent_rfq: row._id, linked_project: { $exists: true, $ne: null } });
+    if (row.linked_project || convertedWorkflow) return res.status(409).json({ success: false, error: "This RFQ or one of its workflows was converted to a project and cannot be deleted" });
+    const workflowIds = await RfqWorkflow.find({ parent_rfq: row._id }).distinct("_id");
+    await Component.deleteMany({ $or: [{ rfq_item: row._id }, { workflow_instance: { $in: workflowIds } }] });
+    await RfqWorkflow.deleteMany({ parent_rfq: row._id });
     await row.deleteOne();
     res.json({ success: true, message: "RFQ deleted" });
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }
@@ -234,12 +295,7 @@ export const setTargets = async (req, res) => {
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }
 };
 
-export const transition = async (req, res) => {
-  try {
-    const result = await transitionRfq(req.params.rfqItemID, req.body.stage, req.body.data || {}, req.user);
-    res.json({ success: true, message: `${req.body.stage} completed`, ...result });
-  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
-};
+export const transition = async (_req, res) => res.status(409).json({ success: false, error: "RFQ records do not run stages. Start a batch workflow and perform stage actions inside that workflow." });
 
 export const editStage = async (req, res) => {
   try {
@@ -286,4 +342,189 @@ export const getRfqReport = async (req, res) => {
   try {
     res.json({ reports: { rfq: await buildRfqReport(req.user, req.query) }, allowed_departments: reportDepartmentsFor(req.user.role) });
   } catch (e) { res.status(500).json({ error: e.message }); }
+};
+// Independent workflow instances. Each instance snapshots the selected part hierarchy
+// and owns its own lifecycle fields/history in the rfq_workflows collection.
+export const getRfqWorkflows = async (req, res) => {
+  try {
+    const rows = await RfqWorkflow.find({ parent_rfq: req.params.rfqItemID })
+      .select("workflow_number workflow_name rfq_number project_name customer selected_parts main_parts current_stage rfq_status stage_schedule costing purchase_order stage_remarks createdAt updatedAt linked_project")
+      .sort({ createdAt: 1 }).lean();
+    res.json(rows.map((row) => {
+      const selectedParts = (row.selected_parts || []).map((part) => {
+        const subIds = (part.sub_part_ids || []).map(String);
+        const legacyWholeMain = part.main_part_selected === undefined && subIds.length === 0;
+        const sourceMain = (row.main_parts || []).find((main) => String(main._id) === String(part.main_part_id));
+        return { ...part, main_part_selected: Boolean(part.main_part_selected || legacyWholeMain), sub_part_ids: legacyWholeMain ? (sourceMain?.sub_parts || []).map((sub) => String(sub._id)) : subIds };
+      });
+      return {
+      ...row,
+      selected_parts: selectedParts,
+      main_part_qty: selectedParts.filter((part) => part.main_part_selected).length,
+      sub_part_qty: selectedParts.reduce((count, part) => count + (part.sub_part_ids || []).length, 0),
+      quoted_value: Number(row.costing?.quoted_price || 0),
+      awarded_value: row.rfq_status === "AWARDED" ? Number(row.costing?.quoted_price || 0) * Number(row.purchase_order?.po_qty || 1) : 0,
+      latest_remark: (row.stage_remarks || []).slice(-1)[0] || null,
+    };
+    }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+export const createRfqWorkflow = async (req, res) => {
+  try {
+    const parent = await RfqItem.findById(req.params.rfqItemID);
+    if (!parent) return res.status(404).json({ error: "RFQ not found" });
+    if (!canUpdateRfq(req.user, parent)) return res.status(403).json({ error: "You do not have permission to create a workflow for this RFQ" });
+    const initialDate = new Date(req.body.initial_target_date);
+    if (!req.body.initial_target_date || Number.isNaN(initialDate.getTime())) throw new Error("A valid initial target date is required before starting the workflow");
+    const selection = req.body.selected_parts;
+    if (!Array.isArray(selection) || selection.length === 0) throw new Error("Select at least one main part or subpart");
+
+    const existing = await RfqWorkflow.find({ parent_rfq: parent._id }).select("selected_parts").lean();
+    const usedMainIds = new Set();
+    const usedSubIds = new Set();
+    for (const wf of existing) for (const part of wf.selected_parts || []) {
+      const subIds = (part.sub_part_ids || []).map(String);
+      // Compatibility with the earlier workflow prototype, where an empty sub-part list meant the whole main-part hierarchy.
+      const legacyWholeMain = part.main_part_selected === undefined && subIds.length === 0;
+      if (part.main_part_selected || legacyWholeMain) usedMainIds.add(String(part.main_part_id));
+      for (const subId of subIds) usedSubIds.add(subId);
+      if (legacyWholeMain) {
+        const legacyMain = parent.main_parts.id(part.main_part_id);
+        for (const sub of legacyMain?.sub_parts || []) usedSubIds.add(String(sub._id));
+      }
+    }
+
+    const selectedParts = [];
+    const workflowParts = [];
+    const seenMain = new Set();
+    const seenSubs = new Set();
+    for (const item of selection) {
+      const main = parent.main_parts.id(item.main_part_id);
+      if (!main) throw new Error(`Main part ${item.main_part_id} does not belong to this RFQ`);
+      const mainSelected = Boolean(item.main_part_selected);
+      const requestedSubs = Array.isArray(item.sub_part_ids) ? item.sub_part_ids.map(String) : [];
+      if (!mainSelected && requestedSubs.length === 0) continue;
+      if (seenMain.has(String(main._id))) throw new Error(`Duplicate selection for main part ${main.main_part_no}`);
+      seenMain.add(String(main._id));
+      if (mainSelected && usedMainIds.has(String(main._id))) throw new Error(`Main part ${main.main_part_no} is already assigned to another workflow`);
+      for (const subId of requestedSubs) {
+        if (!main.sub_parts.id(subId)) throw new Error(`Subpart ${subId} does not belong to main part ${main.main_part_no}`);
+        if (seenSubs.has(subId)) throw new Error(`Subpart ${subId} was selected more than once`);
+        if (usedSubIds.has(subId)) throw new Error(`Subpart ${subId} under ${main.main_part_no} is already assigned to another workflow`);
+        seenSubs.add(subId);
+      }
+      selectedParts.push({ main_part_id: main._id, main_part_selected: mainSelected, sub_part_ids: requestedSubs });
+      const part = main.toObject();
+      part.sub_parts = part.sub_parts.filter((sub) => requestedSubs.includes(String(sub._id)));
+      workflowParts.push(part);
+    }
+    if (!selectedParts.length) throw new Error("Select at least one main part or subpart");
+
+    const workflowCount = await RfqWorkflow.countDocuments({ parent_rfq: parent._id });
+    const workflowNumber = `${parent.rfq_number}-WF-${String(workflowCount + 1).padStart(3, "0")}`;
+    const source = parent.toObject();
+    ["_id", "__v", "createdAt", "updatedAt", "linked_project"].forEach((key) => delete source[key]);
+    source.parent_rfq = parent._id;
+    source.workflow_number = workflowNumber;
+    source.workflow_name = workflowNumber;
+    source.initial_target_date = initialDate;
+    source.workflow_started = true;
+    source.main_parts = workflowParts;
+    source.selected_parts = selectedParts;
+    source.main_part_no = workflowParts[0].main_part_no;
+    source.sub_part_no = workflowParts[0].sub_parts?.[0]?.sub_part_no || "";
+    source.volume_per_annum_nos = workflowParts.filter((part) => selectedParts.some((selection) => String(selection.main_part_id) === String(part._id) && selection.main_part_selected)).reduce((sum, part) => sum + Number(part.volume_per_annum_nos || 0), 0) || Number(parent.volume_per_annum_nos || 1);
+    source.current_stage = "DOCUMENT_REVIEW";
+    source.rfq_status = "WAITING_FOR_APPROVAL";
+    source.customer_decision = undefined;
+    source.awarded_date = undefined;
+    source.costing = { status: "COSTING_IN_PROGRESS" };
+    source.technical_review = { status: "IN_PROGRESS" };
+    source.feasibility_status = undefined;
+    source.tooling_category = undefined;
+    source.dfm_review = { status: "IN_PROGRESS" };
+    source.commercial_review = { status: "IN_PROGRESS" };
+    source.proto_capex = undefined;
+    source.proto_build = { status: "NOT_STARTED" };
+    source.capex_status = "NOT_STARTED";
+    source.pilot_build = { status: "NOT_STARTED" };
+    source.customer_approval_pilot = { approved: false };
+    source.customer_approval = { approved: false };
+    source.actual_bom_defined_date = undefined;
+    source.purchase_order = undefined;
+    source.mass_production = { status: "NOT_READY" };
+    source.linked_project = undefined;
+    source.purchase_items = [];
+    source.stage_attachments = {};
+    source.stage_history = [{ stage: "CUSTOMER_RFQ_RECEIVED", action: "COMPLETED", user: req.user._id, note: `Workflow ${workflowNumber} started`, completedAt: new Date() }];
+    source.stage_remarks = [];
+    source.stage_schedule = STAGES.map((stage) => ({ stage, target_date: stage === "DOCUMENT_REVIEW" ? initialDate : undefined, completed_date: stage === "CUSTOMER_RFQ_RECEIVED" ? new Date() : undefined }));
+    const workflow = await RfqWorkflow.create(source);
+    parent.workflow_started = true;
+    await parent.save();
+    res.status(201).json({ success: true, message: "Batch workflow started", workflow });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+};
+
+export const getRfqWorkflowInstance = async (req, res) => {
+  try {
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID })
+      .populate("project_owner", "name email role")
+      .populate("stage_history.user", "name role").lean();
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    const summary = await getWorkflowSummary(workflow._id, RfqWorkflow);
+    if (summary?.rfq) {
+      const selections = summary.rfq.selected_parts || [];
+      summary.rfq.main_parts = (summary.rfq.main_parts || []).map((main) => {
+        const selection = selections.find((item) => String(item.main_part_id) === String(main._id));
+        const legacyWholeMain = selection && selection.main_part_selected === undefined && !(selection.sub_part_ids || []).length;
+        return { ...main, workflow_selected_main_part: Boolean(selection?.main_part_selected || legacyWholeMain) };
+      });
+    }
+    res.json({ ...summary, permissions: permissionsFor(req.user, workflow) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+};
+
+export const transitionWorkflowInstance = async (req, res) => {
+  try {
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    const result = await transitionRfq(workflow._id, req.body.stage, req.body.data || {}, req.user, RfqWorkflow);
+    res.json({ success: true, message: `${req.body.stage} completed`, ...result });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+};
+
+export const addWorkflowRemark = async (req, res) => {
+  try {
+    const { stage, text } = req.body;
+    if (!WORKFLOW_STAGES.includes(stage)) throw new Error("Invalid workflow stage");
+    if (!text?.trim()) throw new Error("Remark cannot be empty");
+    const row = await RfqWorkflow.findOneAndUpdate(
+      { _id: req.params.workflowID, parent_rfq: req.params.rfqItemID },
+      { $push: { stage_remarks: { stage, text, user: req.user._id, user_name: req.user.name, user_role: req.user.role } }, $set: { "stage_history.$[entry].updatedAt": new Date() } },
+      { new: true, runValidators: true, projection: { stage_remarks: 1 }, arrayFilters: [{ "entry.stage": stage }] },
+    );
+    if (!row) return res.status(404).json({ error: "Workflow not found" });
+    res.status(201).json({ success: true, message: "Remark added", remarks: row.stage_remarks });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+};
+
+export const editWorkflowStage = async (req, res) => {
+  try {
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    if (!permissionsFor(req.user, workflow).can_edit) return res.status(403).json({ error: "You do not have permission to edit submitted stages" });
+    const result = await editStageRecord(workflow._id, req.params.stage, req.body, RfqWorkflow);
+    res.json({ success: true, message: "Workflow stage updated", rfqItem: result });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+};
+
+export const workflowPurchaseItems = async (req, res) => {
+  try {
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    const updated = await savePurchaseItems(workflow._id, req.body.stage, req.body.items, req.user, RfqWorkflow);
+    res.json({ success: true, message: "Workflow purchase items saved", purchase_items: updated.purchase_items });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 };

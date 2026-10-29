@@ -1,3 +1,4 @@
+import { ENDPOINTS } from "../../../services/endpoints";
 import { ROLES } from "../../../constants/roles";
 
 // [key, label, hasTargetDate] — hasTargetDate=false means the stage is customer / event driven.
@@ -80,3 +81,9 @@ export const stageState = (entry, isCurrent) => {
 export const formatDate = (value) => (value ? new Date(value).toLocaleDateString("en-IN") : "—");
 export const formatMoney = (value) => `₹${Math.round(Number(value || 0)).toLocaleString("en-IN")}`;
 export const errorMessage = (error, fallback = "Something went wrong") => error.response?.data?.error || error.message || fallback;
+
+// Shared endpoint helper keeps existing RFQ routes intact while routing workflow-instance
+// actions to the independent lifecycle endpoints.
+export const rfqApiBase = (rfq) => (rfq?.parent_rfq
+  ? `${ENDPOINTS.RFQ.BASE}/${rfq.parent_rfq}/workflows/${rfq._id}`
+  : `${ENDPOINTS.RFQ.BASE}/${rfq?._id}`);

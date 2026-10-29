@@ -5,10 +5,20 @@ import {
   CURRENT_STAGE, PROJECT_LIFECYCLE_STATUS, HALF_VOLUME_SPLIT_RATIO, WORKFLOW_STAGES,
 } from "../../../constants/rfqEnums.js";
 
+const attachmentSchema = new mongoose.Schema({
+  file_name: { type: String, required: true, trim: true },
+  file_type: { type: String, default: "" },
+  file_size: { type: Number, default: 0, min: 0 },
+  url: { type: String, default: "" },
+  storage_provider: { type: String, enum: ["PENDING_CLOUD_UPLOAD", "CLOUD"], default: "PENDING_CLOUD_UPLOAD" },
+  uploaded_at: { type: Date, default: Date.now },
+}, { _id: true });
+
 const subPartSchema = new mongoose.Schema({
   sub_part_no: { type: String, required: true, trim: true },
   description: { type: String, default: "" },
   qty_per_main_part: { type: Number, default: 1, min: 1 },
+  drawing_attachments: { type: [attachmentSchema], default: [] },
 }, { _id: true });
 
 const mainPartSchema = new mongoose.Schema({
@@ -16,6 +26,7 @@ const mainPartSchema = new mongoose.Schema({
   description: { type: String, default: "" },
   volume_per_annum_nos: { type: Number, required: true, min: 1 },
   rfq_target_date: Date,
+  drawing_attachments: { type: [attachmentSchema], default: [] },
   sub_parts: { type: [subPartSchema], default: [] },
 }, { _id: true });
 
@@ -26,15 +37,6 @@ const stageScheduleSchema = new mongoose.Schema({
 }, { _id: false });
 
 const customerDecisionSchema = new mongoose.Schema({ decision: { type: String, enum: ["AWARDED", "LOST"] }, decision_date: Date, notes: String }, { _id: false });
-
-const attachmentSchema = new mongoose.Schema({
-  file_name: { type: String, required: true, trim: true },
-  file_type: { type: String, default: "" },
-  file_size: { type: Number, default: 0, min: 0 },
-  url: { type: String, default: "" },
-  storage_provider: { type: String, enum: ["PENDING_CLOUD_UPLOAD", "CLOUD"], default: "PENDING_CLOUD_UPLOAD" },
-  uploaded_at: { type: Date, default: Date.now },
-}, { _id: true });
 
 const purchaseItemSchema = new mongoose.Schema({
   stage: { type: String, required: true },
@@ -69,7 +71,8 @@ const rfqItemSchema = new mongoose.Schema({
   rfq_dated: { type: Date, required: true },
   description: { type: String, required: true },
   rfq_target_date: Date,
-  // One target date per lifecycle stage. completed_date is written only by a stage action.
+  // RFQs are intake records only. Workflow stages are initialized after an explicit batch start.
+  workflow_started: { type: Boolean, default: false },
   stage_schedule: { type: [stageScheduleSchema], default: [] },
 
   // Hierarchy: one RFQ -> many main parts -> many sub parts.
@@ -101,7 +104,7 @@ const rfqItemSchema = new mongoose.Schema({
   customer_approval: { approved: { type: Boolean, default: false }, approved_date: Date, notes: String },
   purchase_order: { po_number: String, po_qty: Number, delivery_schedule: [{ date: Date, quantity: Number }], po_received_date: Date },
   mass_production: { handover_target_date: Date, handed_over_date: Date, status: { type: String, enum: MASS_PRODUCTION_STATUS, default: "NOT_READY" } },
-  current_stage: { type: String, enum: CURRENT_STAGE, default: "CUSTOMER_RFQ_RECEIVED" },
+  current_stage: { type: String, enum: [...CURRENT_STAGE, null], default: null },
   remarks: String, linked_project: { type: mongoose.Schema.Types.ObjectId, ref: "Project" },
   stage_history: { type: [stageHistorySchema], default: [] },
   stage_remarks: { type: [stageRemarkSchema], default: [] },

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Panel } from "../../../components/ui";
+import { AttachmentList } from "./AttachmentField";
 
 export default function RfqParts({ mainParts }) {
   const [open, setOpen] = useState({});
@@ -16,7 +17,8 @@ export default function RfqParts({ mainParts }) {
           </button>
           {expanded && <div className="p-2 bg-white/50 space-y-1">
             <p className="text-xs text-slate-600">{part.description || "No description"}</p>
-            {(part.sub_parts || []).map((sub, si) => <div key={sub._id || si} className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs"><span className="text-slate-900 font-mono">{sub.sub_part_no}</span><span className="text-slate-600">{sub.description || "—"}</span><span className="text-right text-slate-700">Qty {sub.qty_per_main_part || 1}</span></div>)}
+            {(part.drawing_attachments || []).length > 0 && <div className="rounded-md border border-slate-200 p-2"><p className="mb-1 text-[11px] font-bold uppercase text-slate-600">Main part drawings</p><AttachmentList items={part.drawing_attachments} /></div>}
+            {(part.sub_parts || []).map((sub, si) => <div key={sub._id || si} className="grid grid-cols-3 gap-2 rounded-md bg-slate-50 border border-slate-200 px-2.5 py-1.5 text-xs"><span className="text-slate-900 font-mono">{sub.sub_part_no}</span><span className="text-slate-600">{sub.description || "—"}</span><span className="text-right text-slate-700">Qty {sub.qty_per_main_part || 1}</span>{(sub.drawing_attachments || []).length > 0 && <div className="col-span-3 border-t border-slate-200 pt-1"><p className="mb-1 text-[11px] font-bold uppercase text-slate-600">Sub-part drawings</p><AttachmentList items={sub.drawing_attachments} /></div>}</div>)}
           </div>}
         </div>;
       })}
