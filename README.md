@@ -24,13 +24,13 @@ Copy `backend/.env.example` to `backend/.env` and set a strong `JWT_SECRET` and 
 
 ```env
 PORT=5000
-MONGO_URI=mongodb://127.0.0.1:27017/tviOne
-JWT_SECRET=replace-with-a-long-random-secret
-JWT_EXPIRES_IN=8h
+MONGO_URI=
+JWT_SECRET=
+JWT_EXPIRES_IN=
 FRONTEND_URL=http://localhost:5173
-ADMIN_NAME=TVI One Admin
-ADMIN_EMAIL=admin@tvione.local
-ADMIN_PASSWORD=ChangeMe123!
+ADMIN_NAME=
+ADMIN_EMAIL=
+ADMIN_PASSWORD=
 ```
 
 ### Create the first administrator
@@ -44,15 +44,6 @@ npm run seed:admin
 ```bash
 npm run dev
 ```
-
-Frontend: `http://localhost:5173`  
-API: `http://localhost:5000/api/health`
-
-Demo administrator:
-- Email: `admin@tvione.local`
-- Password: `ChangeMe123!`
-
-**Change the demo password immediately in a real environment.**
 
 ---
 
