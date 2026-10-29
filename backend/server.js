@@ -124,7 +124,15 @@ app.use((err, req, res, next) => {
   res.status(500).json({ success: false, message: "Internal server error", error: process.env.NODE_ENV === "production" ? undefined : err.message });
 });
 
-const port = process.env.PORT || 5000;
+const port = Number(process.env.PORT || 5000);
+
 connectDB()
-  .then(() => app.listen(port,"0.0.0.0", () => console.log(`TVI One API running on http://localhost:${port}`)))
-  .catch((e) => { console.error("DB connection failed:", e.message); process.exit(1); });
+  .then(() => {
+    app.listen(port, "127.0.0.1", () => {
+      console.log(`TVI One API running on http://127.0.0.1:${port}`);
+    });
+  })
+  .catch((e) => {
+    console.error("DB connection failed:", e.message);
+    process.exit(1);
+  });
