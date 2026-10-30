@@ -1,3 +1,4 @@
+
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -18,10 +19,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "../modules/auth/contexts/AuthContext";
 import { ROLES, ROLE_LABELS, ALL_ROLES, DEPARTMENT_ROLES } from "../constants/roles";
-import { RECEIVABLE_APPROVER_ROLES } from "../modules/finance/constants/financeRoles";
 
 const canSee = (role, allowed) =>
   role === ROLES.ADMIN || role === ROLES.SUPER_USER || allowed.includes(role);
+
 const rowItem =
   "flex items-center justify-between w-full px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-100 hover:text-slate-900 rounded-md transition-colors";
 
@@ -37,57 +38,57 @@ const groups = [
       { label: "Create RFQ", to: "/rfq?create=1", create: true, allowed: [ROLES.NPD_SCRUM_MASTER] },
     ],
   },
-  {
-    label: "Projects",
-    icon: FolderKanban,
-    path: "/projects",
-    allowed: ALL_ROLES,
-    children: [{ label: "Project Register", to: "/projects" }],
-  },
-  {
-    label: "Purchase",
-    icon: ShoppingCart,
-    path: "/purchase",
-    allowed: [ROLES.SCM_MANAGER, ROLES.SCM_USER],
-    children: [
-      { label: "Purchase Orders", to: "/purchase" },
-      {
-        label: "Create Purchase Order",
-        to: "/purchase?create=1",
-        create: true,
-      },
-    ],
-  },
-  {
-    label: "Production",
-    icon: Factory,
-    path: "/production",
-    allowed: [ROLES.PRODUCTION_MANAGER, ROLES.PRODUCTION_USER],
-    children: [
-      { label: "Production Register", to: "/production" },
-      { label: "Record Production", to: "/production?create=1", create: true },
-    ],
-  },
-  {
-    label: "Warehouse",
-    icon: Warehouse,
-    path: "/warehouse",
-    allowed: [ROLES.WAREHOUSE_MANAGER, ROLES.WAREHOUSE_USER],
-    children: [
-      { label: "GRN & Inspection", to: "/warehouse" },
-      { label: "Create GRN", to: "/warehouse?create=1", create: true },
-    ],
-  },
-  {
-    label: "Dispatch",
-    icon: Truck,
-    path: "/dispatch",
-    allowed: [ROLES.DISPATCH_MANAGER, ROLES.DISPATCH_USER],
-    children: [
-      { label: "Dispatch Register", to: "/dispatch" },
-      { label: "Create Dispatch", to: "/dispatch?create=1", create: true },
-    ],
-  },
+  // {
+  //   label: "Projects",
+  //   icon: FolderKanban,
+  //   path: "/projects",
+  //   allowed: ALL_ROLES,
+  //   children: [{ label: "Project Register", to: "/projects" }],
+  // },
+  // {
+  //   label: "Purchase",
+  //   icon: ShoppingCart,
+  //   path: "/purchase",
+  //   allowed: [ROLES.SCM_MANAGER, ROLES.SCM_USER],
+  //   children: [
+  //     { label: "Purchase Orders", to: "/purchase" },
+  //     {
+  //       label: "Create Purchase Order",
+  //       to: "/purchase?create=1",
+  //       create: true,
+  //     },
+  //   ],
+  // },
+  // {
+  //   label: "Production",
+  //   icon: Factory,
+  //   path: "/production",
+  //   allowed: [ROLES.PRODUCTION_MANAGER, ROLES.PRODUCTION_USER],
+  //   children: [
+  //     { label: "Production Register", to: "/production" },
+  //     { label: "Record Production", to: "/production?create=1", create: true },
+  //   ],
+  // },
+  // {
+  //   label: "Warehouse",
+  //   icon: Warehouse,
+  //   path: "/warehouse",
+  //   allowed: [ROLES.WAREHOUSE_MANAGER, ROLES.WAREHOUSE_USER],
+  //   children: [
+  //     { label: "GRN & Inspection", to: "/warehouse" },
+  //     { label: "Create GRN", to: "/warehouse?create=1", create: true },
+  //   ],
+  // },
+  // {
+  //   label: "Dispatch",
+  //   icon: Truck,
+  //   path: "/dispatch",
+  //   allowed: [ROLES.DISPATCH_MANAGER, ROLES.DISPATCH_USER],
+  //   children: [
+  //     { label: "Dispatch Register", to: "/dispatch" },
+  //     { label: "Create Dispatch", to: "/dispatch?create=1", create: true },
+  //   ],
+  // },
  {
   label: "Finance",
   icon: Wallet,
@@ -106,6 +107,10 @@ const groups = [
           label: "Create Payable",
           to: "/finance/payables?create=1",
           create: true
+        },
+        {
+          label: "Payments",
+          to: "/finance/payments"
         }
       ]
     },
@@ -126,9 +131,8 @@ const groups = [
           create: true
         },
         {
-          label: "Approve Receivable",
-          to: "/finance/receivables/approve",
-          allowed: RECEIVABLE_APPROVER_ROLES
+          label: "Collection",
+          to: "/finance/collection"
         }
       ]
     },
@@ -160,7 +164,8 @@ const groups = [
         {
           label: "Create Credit Note",
           to: "/finance/credits?create=1",
-          create: true
+          create: true,
+          allowed: [ROLES.ADMIN, ROLES.SUPER_USER]
         }
       ]
     }

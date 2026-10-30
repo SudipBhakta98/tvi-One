@@ -7,6 +7,7 @@ import { creditApi } from "../api.js";
 import CreditNoteDialog from "../components/creditComponets/CreditNoteDialog.jsx";
 import CreateCreditDialog from "../components/creditComponets/CreateCreditDialog.jsx";
 import { formatCurrency, formatDateDMY } from "../utils/financeFormat.js";
+import { canManageCreditNotes } from "../constants/financeRoles.js";
 
 // ============================================================
 // HELPERS & FORMATTERS
@@ -73,6 +74,7 @@ function CreditStatusBadge({ status }) {
 // ============================================================
 
 export default function CreditPage() {
+  const canManageCredits = canManageCreditNotes();
   const [creditNotes, setCreditNotes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -236,12 +238,12 @@ export default function CreditPage() {
             Overview, unallocated balance, and allocation logs
           </p>
         </div>
-        <button
+        {canManageCredits && <button
           onClick={() => setIsCreateModalOpen(true)}
           className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm shadow-sm transition-colors self-start sm:self-auto"
         >
           + Create Credit Note
-        </button>
+        </button>}
       </div>
 
       {/* Metric Cards */}
@@ -444,15 +446,16 @@ export default function CreditPage() {
       {selectedCreditNoteNo && (
         <CreditNoteDialog
           creditNoteNumber={selectedCreditNoteNo}
+          canManage={canManageCredits}
           onClose={() => setSelectedCreditNoteNo(null)}
         />
       )}
       {/* Create Modal Integration */}
-      <CreateCreditDialog
+      {canManageCredits && <CreateCreditDialog
         isOpen={isCreateModalOpen}
         onClose={() => setIsCreateModalOpen(false)}
         onSuccess={fetchCreditNotes}
-      />
+      />}
     </div>
   );
 }

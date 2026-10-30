@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { paymentApi, creditApi } from "../../api.js";
+import { canManageCreditNotes, isFinanceSuperUser } from "../../constants/financeRoles.js";
 import { formatCurrency, formatDateDMY } from "../../utils/financeFormat.js";
 import AdvanceUsagePanel, {
   buildAdvancePayload,
@@ -48,7 +49,7 @@ function PaymentStatusBadge({ status }) {
   );
 }
 
-export default function PaymentCard({ payment, onRefresh, invoice, totalPendingPaymentAmount = 0 }) {
+export default function PaymentCard({ payment, onRefresh, invoice, totalPendingPaymentAmount = 0, canManage = true }) {
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -66,6 +67,8 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
 
   const paymentId = payment._id || payment.id;
   const isApproved = payment.status === "Approved";
+  const canManageCreditAllocation = canManageCreditNotes();
+  const canDeletePayment = isFinanceSuperUser() || (Boolean(payment.creditNoteNumber) && canManageCreditAllocation);
   const isNonCash = editForm.paymentMethod && editForm.paymentMethod !== "CASH";
 
   // While editing, exclude the current payment from the pending total
@@ -118,6 +121,7 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
   useEffect(() => {
     let isMounted = true;
     const fetchCredits = async () => {
+      if (!canManageCreditAllocation) return;
       try {
         setLoadingCredits(true);
         const res = await creditApi.pendingAndPartialCredits();
@@ -227,6 +231,11 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
 
     if (advanceError) {
       setFeedback({ type: "error", message: advanceError });
+      return;
+    }
+
+    if (needsCredit && !canManageCreditAllocation) {
+      setFeedback({ type: "error", message: "Only Super User and Admin can allocate Credit Notes." });
       return;
     }
 
@@ -438,15 +447,15 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
                   )}
 
                   {/* ACTIONS */}
-                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
-                    <button
+                  {canManage && (canDeletePayment || canManageCreditAllocation) && <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                    {canDeletePayment && <button
                       onClick={handleDelete}
                       disabled={loading}
                       className="px-3 py-1.5 bg-red-600/80 hover:bg-red-600 text-slate-900 font-bold rounded text-[11px] disabled:opacity-50 transition-colors"
                     >
                       {loading ? "Deleting..." : "Delete"}
-                    </button>
-                    {!isApproved ? (
+                    </button>}
+                    {!isApproved && canManageCreditAllocation ? (
                       <button
                         onClick={() => {
                           clearFeedback();
@@ -461,7 +470,7 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
                         Approved entries cannot be edited
                       </span>
                     )}
-                  </div>
+                  </div>}
                 </div>
               ) : (
                 /* EDIT FORM */
@@ -556,7 +565,7 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
                   )}
 
                   {/* CREDIT NOTE SELECTION */}
-                  <div>
+                  {canManageCreditAllocation && <div>
                     <label className="block text-slate-400 font-medium mb-1">
                       Credit Note Number{" "}
                       {!needsCredit && <span className="text-slate-400">(not needed – fully settled from advance)</span>}
@@ -581,7 +590,7 @@ export default function PaymentCard({ payment, onRefresh, invoice, totalPendingP
                         Credit note part (₹{creditPortion}) cannot exceed credit balance ₹{maxCreditAllowed + ownCreditBack}
                       </p>
                     )}
-                  </div>
+                  </div>}
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>

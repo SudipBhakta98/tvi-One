@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { AlertCircle, CheckCircle2, Loader2, X } from "lucide-react";
 import { paymentApi, creditApi } from "../../api.js";
+import { canManageCreditNotes } from "../../constants/financeRoles.js";
 import AdvanceUsagePanel, {
   buildAdvancePayload,
   validateAdvanceUsage,
@@ -15,6 +16,7 @@ export default function AddPaymentDialog({
 }) {
   // "Pay with Advance" and "Add Payment" are separate modes: advance only, or credit note only.
   const isAdvanceMode = preselectAdvance;
+  const canManageCredits = canManageCreditNotes();
 
   // Extract outstanding limit safely from invoice prop
   const maxOutstanding = Number(invoice?.outstanding ?? 0);
@@ -86,6 +88,7 @@ export default function AddPaymentDialog({
   useEffect(() => {
     let isMounted = true;
     const fetchCredits = async () => {
+      if (!canManageCredits) return;
       try {
         setLoadingCredits(true);
         const res = await creditApi.pendingAndPartialCredits();
@@ -165,6 +168,12 @@ export default function AddPaymentDialog({
     if (advanceError) {
       setIsSuccess(false);
       setServerMessage(advanceError);
+      return;
+    }
+
+    if (needsCredit && !canManageCredits) {
+      setIsSuccess(false);
+      setServerMessage("Only Super User and Admin can allocate Credit Notes. Please contact an authorized user.");
       return;
     }
 
@@ -477,7 +486,7 @@ export default function AddPaymentDialog({
             {/* CREDIT NOTE & TXN NUMBER */}
             {!isAdvanceMode && (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-1">
+                {canManageCredits ? <div className="space-y-1">
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                     Credit Note Number{" "}
                     {needsCredit ? (
@@ -511,7 +520,7 @@ export default function AddPaymentDialog({
                       </option>
                     ))}
                   </select>
-                </div>
+                </div> : <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">Credit Note allocation is restricted to Super User and Admin.</p>}
 
                 <div className="space-y-1">
                   <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider">

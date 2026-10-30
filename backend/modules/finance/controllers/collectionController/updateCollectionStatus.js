@@ -1,13 +1,15 @@
 import mongoose from "mongoose";
 import Collection from "../../models/collectionModel.js";
+import { ROLES } from "../../../../constants/roles.js";
 
-/** Approve or reject a Pending collection. Admin / Super User only (mapped by mapFinanceUser). */
+/** Approve or reject a Pending collection. Super User only; checks the original application role. */
 export const updateCollectionStatus = async (req, res) => {
   try {
     const { collectionId } = req.params;
     const { status } = req.body;
 
-    if (req.user?.role !== "Super User") {
+    const actualRole = req.user?.originalRole || req.user?.role;
+    if (actualRole !== ROLES.SUPER_USER && actualRole !== "Super User") {
       return res.status(403).json({ success: false, message: "You do not have permission to approve or reject this collection." });
     }
     if (!mongoose.Types.ObjectId.isValid(collectionId)) {

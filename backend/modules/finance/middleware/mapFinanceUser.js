@@ -14,8 +14,11 @@ import { ROLES } from "../../../constants/roles.js";
  * expect, so their untouched internal checks
  * (`req.user.role !== "Super User"`) keep working:
  *
- *   ADMIN / SUPER_USER / FINANCE_MANAGER -> "Super User" (full finance rights)
+ *   ADMIN / SUPER_USER / FINANCE_MANAGER -> "Super User" (legacy finance rights)
  *   FINANCE_USER                          -> "User"       (read + limited create)
+ *
+ * `originalRole` is retained for sensitive operation-level checks so that
+ * legacy elevation never turns an Admin/Finance Manager into a Super User.
  *
  * No business rule inside the finance module is modified.
  */
@@ -28,6 +31,7 @@ export const mapFinanceUser = (req, res, next) => {
     name: req.user.name,
     email: req.user.email,
     role: isElevated ? "Super User" : "User",
+    originalRole: role,
     isActive: req.user.isActive,
     createdAt: req.user.createdAt,
     updatedAt: req.user.updatedAt

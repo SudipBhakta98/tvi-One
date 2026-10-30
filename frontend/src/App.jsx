@@ -1,9 +1,9 @@
+
 import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./modules/auth/contexts/AuthContext";
 import AppLayout from "./layout/AppLayout";
 import { ROLES } from "./constants/roles";
-import { RECEIVABLE_APPROVER_ROLES } from "./modules/finance/constants/financeRoles";
 
 const LoginPage = lazy(() => import("./modules/auth/pages/LoginPage"));
 const DashboardPage = lazy(
@@ -76,6 +76,9 @@ const ReceivablesProvider = lazy(() =>
 const AccountPage = lazy(() => import("./modules/settings/pages/AccountPage"));
 const ReportsPage = lazy(() => import("./modules/reports/pages/ReportsPage"));
 const PayablesPage = lazy(() => import("./modules/finance/pages/PayablesPage"));
+const PaymentsPage = lazy(
+  () => import("./modules/finance/pages/PaymentsPage"),
+);
 const CreditPage = lazy(() => import("./modules/finance/pages/CreditPage"));
 const AdvancePaymentPage = lazy(
   () => import("./modules/finance/pages/AdvancePaymentPage"),
@@ -83,8 +86,8 @@ const AdvancePaymentPage = lazy(
 const ReceivablesPage = lazy(
   () => import("./modules/finance/pages/ReceivablesPage"),
 );
-const ApproveReceivablesPage = lazy(
-  () => import("./modules/finance/pages/ApproveReceivablesPage"),
+const CollectionPage = lazy(
+  () => import("./modules/finance/pages/CollectionPage"),
 );
 
 const ModuleRoute = ({ Provider, Page }) => (
@@ -151,12 +154,19 @@ export default function App() {
             />
             <Route path="/account" element={<AccountPage />} />
             <Route path="/reports" element={<ReportsPage />} />
+
             <Route
               path="/finance/payables"
               element={
                 <ModuleRoute Provider={PayablesProvider} Page={PayablesPage} />
               }
             />
+
+            <Route
+              path="/finance/payments"
+              element={<PaymentsPage />}
+            />
+
             <Route
               path="/finance/receivables"
               element={
@@ -166,14 +176,24 @@ export default function App() {
                 />
               }
             />
-            {RECEIVABLE_APPROVER_ROLES.includes(user.role) && (
-              <Route
-                path="/finance/receivables/approve"
-                element={<ApproveReceivablesPage />}
-              />
-            )}
+
+            {/* Collection is visible to the Finance team. Only Super User can update status inside CollectionPage. */}
+            <Route
+              path="/finance/collection"
+              element={<CollectionPage />}
+            />
+
+            {/* Redirect old approval URL to the new Collection page for all users. */}
+            <Route
+              path="/finance/receivables/approve"
+              element={
+                <Navigate to="/finance/collection" replace />
+              }
+            />
+
             <Route path="/finance/advances" element={<AdvancePaymentPage />} />
             <Route path="/finance/credits" element={<CreditPage />} />
+
             {user.role === ROLES.ADMIN && (
               <Route
                 path="/admin"

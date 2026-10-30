@@ -66,6 +66,7 @@ export default function CreditNoteDialog({
   onClose,
   onDetailsFetched,
   onRecordChanged,
+  canManage = true,
 }) {
   const { success: showSuccess } = useToast();
 
@@ -146,6 +147,7 @@ export default function CreditNoteDialog({
   const status = getCalculatedStatus(activeCredit);
 
   const handleApproveRequest = async (requestId, paymentId) => {
+    if (!canManage) return;
     try {
       setActionLoadingId({ id: requestId, type: "approve" });
 
@@ -176,6 +178,7 @@ export default function CreditNoteDialog({
   };
 
   const handleRejectRequest = async (requestId, paymentId) => {
+    if (!canManage) return;
     try {
       setActionLoadingId({ id: requestId, type: "reject" });
 
@@ -207,6 +210,7 @@ export default function CreditNoteDialog({
 
   const handleEditSubmit = async (e) => {
     e.preventDefault();
+    if (!canManage) return;
     try {
       setLoading(true);
 
@@ -237,6 +241,7 @@ export default function CreditNoteDialog({
   };
 
   const handleConfirmDelete = async () => {
+    if (!canManage) return;
     try {
       setLoading(true);
       const response = await creditApi.deleteCredit(targetCreditNoteNumber);
@@ -448,18 +453,20 @@ export default function CreditNoteDialog({
           </div>
 
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowEditModal(true)}
-              className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold transition-colors"
-            >
-              Edit
-            </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-md text-xs font-semibold transition-colors"
-            >
-              Delete
-            </button>
+            {canManage && <>
+              <button
+                onClick={() => setShowEditModal(true)}
+                className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md text-xs font-semibold transition-colors"
+              >
+                Edit
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(true)}
+                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-md text-xs font-semibold transition-colors"
+              >
+                Delete
+              </button>
+            </>}
             <button
               className="w-7 h-7 rounded-md bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors flex items-center justify-center text-xs shrink-0 font-bold"
               onClick={onClose}
@@ -809,7 +816,7 @@ export default function CreditNoteDialog({
                         </div>
 
                         {/* APPROVE & REJECT ACTION BUTTONS */}
-                        <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                        {canManage && <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
                           <button
                             onClick={() =>
                               handleApproveRequest(requestId, paymentId)
@@ -828,7 +835,7 @@ export default function CreditNoteDialog({
                           >
                             {isRejecting ? "Rejecting..." : "Reject"}
                           </button>
-                        </div>
+                        </div>}
                       </div>
                     );
                   })}

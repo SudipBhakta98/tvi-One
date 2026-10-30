@@ -1,8 +1,9 @@
+import { canManageCreditNotes } from "../../utils/creditNoteAuthorization.js";
 import Credit from "../../models/creditModel.js";
 
 export const updateCredit = async (req, res) => {
   try {
-    if (req.user?.role !== "Super User") {
+    if (!canManageCreditNotes(req.user)) {
       return res.status(403).json({
         success: false,
         message: "You do not have permission to update a Credit Note.",

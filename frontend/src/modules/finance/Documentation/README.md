@@ -182,3 +182,24 @@ app.use("/api/finance/collection", ...financeAccess, collectionRoutes);
 - Money is shown with `formatCurrency`; dates with `formatDateDMY` (any date value) or `formatDateString` (dates already formatted by the backend).
 - Amount inputs are cleaned with `decimalOnly`.
 - Constants such as `PAYMENT_TERM_DAYS` have names; there are no unexplained numbers in the calculations.
+
+## Updated Collection and Payments workflow
+
+- `pages/CollectionPage.jsx` is the renamed collection review page. `ApproveReceivablesPage.jsx` remains as a compatibility re-export for an existing route import.
+- `pages/PaymentsPage.jsx` is the supplier payment review page. It uses the existing payment API and `PaymentCard` component, with Pending / Approved / Rejected tabs and the same Super User-only approval/rejection action pattern as Collection.
+- Collection status changes are Super User only. Credit Note create, edit, delete, and allocation-request approval/rejection are Super User or Admin only. Backend checks use `originalRole` preserved by `mapFinanceUser`, so the legacy Finance Manager elevation cannot bypass these rules.
+
+### Host application route and sidebar updates
+
+The uploaded frontend ZIP contains only `src/modules/finance/`; it does not contain the host application's `App.jsx` or `AppLayout.jsx`. Add/update these host-app entries when copying the module:
+
+```jsx
+import CollectionPage from "./modules/finance/pages/CollectionPage.jsx";
+import PaymentsPage from "./modules/finance/pages/PaymentsPage.jsx";
+
+// Register under the existing finance route/provider conventions:
+<Route path="/finance/collection" element={<CollectionPage />} />
+<Route path="/finance/payments" element={<PaymentsPage />} />
+```
+
+In the Finance sidebar, replace the old **Approve Receivable** label/link with **Collection** (`/finance/collection`) and add **Payments** under Payables (`/finance/payments`). Update any existing old `/finance/receivables/approve` route to redirect to `/finance/collection` if bookmarks must continue working. Use `RECEIVABLE_APPROVER_ROLES` for any Collection menu visibility check; it now contains only `SUPER_USER`.

@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Payment from "../../models/paymentModel.js";
 import Credit from "../../models/creditModel.js";
 import SupplierAdvance from "../../models/supplierAdvanceModel.js";
+import { canManageCreditNotes } from "../../utils/creditNoteAuthorization.js";
 
 import { getInvoiceFinancials } from "../../utils/invoiceFinancials.js";
 import {
@@ -60,6 +61,9 @@ export const createSinglePayment = async (req, res) => {
     const supplier = String(supplierName || "").trim();
     const method = String(paymentMethod || "").toUpperCase().trim();
     const creditNo = creditNoteNumber ? String(creditNoteNumber).trim() : null;
+    if (creditNo && !canManageCreditNotes(req.user)) {
+      return res.status(403).json({ success: false, message: "Only Super User and Admin can use Credit Notes for payment allocation." });
+    }
     const txnNo = String(transactionNumber || "").trim();
     const amount = round2(paidAmount);
     const date = new Date(paymentDate);

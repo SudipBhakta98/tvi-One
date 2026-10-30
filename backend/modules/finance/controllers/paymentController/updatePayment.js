@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 
 import Payment from "../../models/paymentModel.js";
 import Credit from "../../models/creditModel.js";
+import { canManageCreditNotes } from "../../utils/creditNoteAuthorization.js";
 
 import {
   getInvoiceFinancials,
@@ -94,6 +95,13 @@ export const updatePayment = async (
         success: false,
         message:
           "Payment record not found.",
+      });
+    }
+
+    if ((payment.creditNoteNumber || creditNoteNumber) && !canManageCreditNotes(req.user)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Super User and Admin can modify Credit Note payment allocations.",
       });
     }
 

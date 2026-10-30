@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Payment from "../../models/paymentModel.js";
 import Credit from "../../models/creditModel.js";
 import SupplierAdvance from "../../models/supplierAdvanceModel.js";
+import { canManageCreditNotes } from "../../utils/creditNoteAuthorization.js";
+import { ROLES } from "../../../../constants/roles.js";
 import {
   settleAdvances,
   releaseAdvances,
@@ -14,10 +16,6 @@ export const updatePaymentStatus = async (req, res) => {
   try {
     const { paymentId } = req.params;
     const { status } = req.body;
-
-    if (req.user?.role !== "Super User") {
-      return res.status(403).json({ success: false, message: "You do not have permission to approve or reject this payment." });
-    }
 
     if (!mongoose.Types.ObjectId.isValid(paymentId)) {
       return res.status(400).json({ success: false, message: "The payment ID is not valid." });
@@ -32,6 +30,14 @@ export const updatePaymentStatus = async (req, res) => {
     await session.withTransaction(async () => {
       const payment = await Payment.findById(paymentId).session(session);
       if (!payment) throw new Error("PAYMENT_NOT_FOUND");
+
+      const actualRole = req.user?.originalRole || req.user?.role;
+      const isSuperUser = actualRole === ROLES.SUPER_USER || actualRole === "Super User";
+      const mayApproveCreditAllocation = payment.creditNoteNumber && canManageCreditNotes(req.user);
+      if (!isSuperUser && !mayApproveCreditAllocation) {
+        const e = new Error("FORBIDDEN_PAYMENT_STATUS");
+        throw e;
+      }
 
       if (payment.status !== "Pending") {
         const e = new Error("ALREADY_PROCESSED");
@@ -120,6 +126,9 @@ export const updatePaymentStatus = async (req, res) => {
     const adv = advanceErrorResponse(error);
     if (adv) return res.status(adv[0]).json({ success: false, message: adv[1] });
 
+    if (error.message === "FORBIDDEN_PAYMENT_STATUS") {
+      return res.status(403).json({ success: false, message: "Only Super User can approve or reject payments. Credit Note allocation requests can be actioned by Super User or Admin." });
+    }
     if (error.message === "PAYMENT_NOT_FOUND") {
       return res.status(404).json({ success: false, message: "We couldn't find this payment." });
     }

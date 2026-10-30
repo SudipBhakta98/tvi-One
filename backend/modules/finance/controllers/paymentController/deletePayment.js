@@ -2,16 +2,11 @@ import mongoose from "mongoose";
 import Payment from "../../models/paymentModel.js";
 import Credit from "../../models/creditModel.js";
 import { releaseAdvances, advanceErrorResponse } from "../../utils/advanceSettlement.js";
+import { canManageCreditNotes } from "../../utils/creditNoteAuthorization.js";
+import { ROLES } from "../../../../constants/roles.js";
 
 export const deletePayment = async (req, res) => {
   const { paymentId } = req.params;
-
-  if (req.user?.role !== "Super User") {
-    return res.status(403).json({
-      success: false,
-      message: "You do not have permission to delete this payment.",
-    });
-  }
 
   if (!mongoose.Types.ObjectId.isValid(paymentId)) {
     return res.status(400).json({
@@ -26,6 +21,18 @@ export const deletePayment = async (req, res) => {
     return res.status(404).json({
       success: false,
       message: "We couldn't find this payment.",
+    });
+  }
+
+  const actualRole = req.user?.originalRole || req.user?.role;
+  const isSuperUser = actualRole === ROLES.SUPER_USER || actualRole === "Super User";
+  const mayDeleteCreditAllocation = payment.creditNoteNumber && canManageCreditNotes(req.user);
+  if (!isSuperUser && !mayDeleteCreditAllocation) {
+    return res.status(403).json({
+      success: false,
+      message: payment.creditNoteNumber
+        ? "Only Super User and Admin can delete a payment linked to a Credit Note."
+        : "Only Super User can delete this payment.",
     });
   }
 
