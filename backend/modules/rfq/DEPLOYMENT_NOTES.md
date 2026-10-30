@@ -37,3 +37,17 @@ No new package is required. Existing records do not require a destructive migrat
 ## Important integration boundary
 
 These archives contain the RFQ modules, not the entire application. Static syntax checks were performed on the modified RFQ code, but full application compilation, authentication integration, database behavior, and project-module integration cannot be verified without the complete application repositories and a test database. Test on a staging environment before replacing production folders.
+
+## RFQ lifecycle controls (Pause / Resume / Complete / Cancel)
+
+The parent RFQ lifecycle is stored separately from the existing workflow/customer outcome field:
+
+- `lifecycle_status`: `ACTIVE` (default), `PAUSED`, `COMPLETED`, or `CANCELLED`.
+- `POST /:rfqItemID/lifecycle` accepts `{ action: "PAUSE" | "RESUME" | "COMPLETE" | "CANCEL", reason }`.
+- PAUSE marks only running child workflows as `PAUSED` and records `paused_by_parent=true` plus their previous lifecycle status.
+- RESUME restores only workflows paused by that parent RFQ, preserving current stage and stage history.
+- COMPLETE / CANCEL stop running workflows as `STOPPED_BY_RFQ_COMPLETION` / `STOPPED_BY_RFQ_CANCELLATION`; existing completed workflows and all stage history remain unchanged.
+- Workflow creation is rejected unless the parent RFQ is `ACTIVE`. Stage transitions are rejected unless both parent RFQ and workflow are active.
+- Workflow lifecycle is separate from `rfq_status`, which continues to represent the existing customer/commercial decision process.
+
+Existing RFQ documents without `lifecycle_status` are treated as `ACTIVE`; existing workflow documents without `lifecycle_status` are treated as `IN_PROGRESS` by transition and display logic. Back up the database and validate these controls in staging before production rollout.

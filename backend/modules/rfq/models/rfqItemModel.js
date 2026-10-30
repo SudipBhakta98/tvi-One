@@ -63,6 +63,8 @@ const stageRemarkSchema = new mongoose.Schema({
 const rfqItemSchema = new mongoose.Schema({
   rfq_number: { type: String, required: true, trim: true, index: true },
   project_status: { type: String, enum: PROJECT_LIFECYCLE_STATUS, default: "ACTIVE" },
+  lifecycle_status: { type: String, enum: ["ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"], default: "ACTIVE", index: true },
+  lifecycle_updated_at: Date, lifecycle_reason: { type: String, default: "" },
   customer: { type: String, required: true, trim: true },
   // project_owner is the source of truth; project_lead is the owner's name, kept in sync server-side for downstream modules.
   project_owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },

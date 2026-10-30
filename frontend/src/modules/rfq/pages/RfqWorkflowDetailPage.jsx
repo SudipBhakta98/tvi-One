@@ -49,11 +49,12 @@ export default function RfqWorkflowDetailPage({ rfqId, workflowId, user, onClose
     <div className="grid grid-cols-2 gap-2 xl:grid-cols-5">
       <KpiCard label="Stages Done" value={`${doneCount} / ${STAGES.length}`} hint="Workflow progress" tone="green" icon={ListChecks} />
       <KpiCard label="Current Stage" value={rfq.current_stage === "COMPLETED" ? "Completed" : stageLabel(rfq.current_stage)} hint="Open stage" tone="amber" icon={Activity} />
-      <KpiCard label="Workflow Status" value={stageLabel(rfq.rfq_status)} hint="Customer outcome for this batch" tone="blue" />
+      <KpiCard label="Workflow Status" value={data.lifecycle_status || "IN_PROGRESS"} hint="Execution status" tone={(data.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS" ? "blue" : "amber"} />
       <KpiCard label="Quoted Value" value={rfq.costing?.quoted_price ? formatMoney(rfq.costing.quoted_price) : "—"} hint="Customer quote" tone="green" icon={IndianRupee} />
       <KpiCard label="Selected Parts" value={`${selectedMainCount} / ${subPartCount}`} hint="Selected main parts / subparts" tone="blue" icon={Layers} />
     </div>
-    <RfqStageGrid data={data} user={user} onComplete={complete} onReload={reload} />
+    {(data.lifecycle_status && data.lifecycle_status !== "IN_PROGRESS" || data.parent_lifecycle_status && data.parent_lifecycle_status !== "ACTIVE") && <Alert>Workflow actions are locked because this workflow or its parent RFQ is not active. The current stage and history are preserved.</Alert>}
+    <RfqStageGrid data={data} user={(data.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS" && (data.parent_lifecycle_status || "ACTIVE") === "ACTIVE" ? user : null} onComplete={complete} onReload={reload} />
     <RfqParts mainParts={rfq.main_parts || []} />
   </RfqFullPage>;
 }

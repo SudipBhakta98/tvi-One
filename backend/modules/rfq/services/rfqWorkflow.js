@@ -166,6 +166,7 @@ export const transitionRfq = async (rfqId, stage, data, user, Model = RfqItem) =
   if (!STAGES.includes(stage)) throw new Error("Invalid workflow stage");
   const rfq = await Model.findById(rfqId);
   if (!rfq) throw new Error("RFQ/workflow not found");
+  if (rfq.lifecycle_status && rfq.lifecycle_status !== "IN_PROGRESS") throw new Error(`Workflow is ${rfq.lifecycle_status.toLowerCase().replaceAll("_", " ")} and cannot advance`);
   if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot perform ${stage}`);
   if (rfq.current_stage !== stage) throw new Error(`Current stage is ${label(String(rfq.current_stage))}`);
 

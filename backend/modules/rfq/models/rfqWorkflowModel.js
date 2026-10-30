@@ -9,6 +9,10 @@ workflowSchema.add({
   workflow_number: { type: String, trim: true },
   workflow_name: { type: String, trim: true },
   initial_target_date: { type: Date },
+  lifecycle_status: { type: String, enum: ["IN_PROGRESS", "PAUSED", "COMPLETED", "STOPPED_BY_RFQ_COMPLETION", "STOPPED_BY_RFQ_CANCELLATION"], default: "IN_PROGRESS", index: true },
+  paused_by_parent: { type: Boolean, default: false },
+  status_before_parent_pause: { type: String },
+  lifecycle_updated_at: Date,
   selected_parts: [{
     main_part_id: { type: mongoose.Schema.Types.ObjectId, required: true },
     main_part_selected: { type: Boolean, default: false },

@@ -150,3 +150,7 @@ Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Produc
 ### Workflow creation request
 
 `POST /:rfqItemID/workflows` accepts `{ initial_target_date, selected_parts }`, where each selection has `main_part_id`, `main_part_selected` (boolean), and `sub_part_ids` (array). The API validates part ownership, rejects duplicate assignments, and requires a valid initial target date.
+
+## Parent RFQ lifecycle controls
+
+The RFQ detail page exposes Pause, Resume, Complete, and Cancel actions. Pause temporarily locks workflow stage actions and records which child workflows were paused by the parent. Resume restores only those workflows to `IN_PROGRESS` without changing their current stage or stage history. Complete and Cancel stop running child workflows with terminal lifecycle statuses while keeping workflow records and history viewable. The RFQ register displays the parent RFQ lifecycle status independently of each workflow's customer/commercial `rfq_status`.

@@ -233,12 +233,7 @@ Response:
 
 Request:
 
-```json
-{
-  "email": "admin@tvione.local",
-  "password": "ChangeMe123!"
-}
-```
+
 
 Response:
 

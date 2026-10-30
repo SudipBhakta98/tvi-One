@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { IndianRupee, Layers, Pencil, Plus, Trash2, Workflow } from "lucide-react";
+import { IndianRupee, Layers, Pencil, Plus, Trash2, Workflow, PauseCircle, PlayCircle, CheckCircle2, Ban } from "lucide-react";
 import api from "../../../services/api";
 import { ENDPOINTS } from "../../../services/endpoints";
 import { Alert, GhostButton, KpiCard, PrimaryButton } from "../../../components/ui";
@@ -114,7 +114,24 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
   const subCount = mainParts.reduce((sum, part) => sum + (part.sub_parts?.length || 0), 0);
   const quotedTotal = workflows.reduce((sum, item) => sum + value(item.quoted_value), 0);
   const awardedTotal = workflows.reduce((sum, item) => sum + value(item.awarded_value), 0);
-  const canCreateWorkflow = Boolean(rfq.permissions?.can_update);
+  const canCreateWorkflow = Boolean(rfq.permissions?.can_update) && (rfq.lifecycle_status || "ACTIVE") === "ACTIVE";
+  const lifecycleStatus = rfq.lifecycle_status || "ACTIVE";
+
+  const changeLifecycle = async (action) => {
+    const labels = { PAUSE: "pause", RESUME: "resume", COMPLETE: "complete", CANCEL: "cancel" };
+    const needsReason = action !== "RESUME";
+    const reason = needsReason ? window.prompt(`Reason to ${labels[action]} RFQ ${rfq.rfq_number}:`) : "";
+    if (needsReason && !reason?.trim()) return;
+    const confirmation = window.confirm(`Are you sure you want to ${labels[action]} this RFQ? ${action === "PAUSE" ? "Running workflows will pause and can later resume from their current stages." : action === "RESUME" ? "Workflows paused by this RFQ will resume from their existing stages." : "All running workflows will be stopped, while their history remains available."}`);
+    if (!confirmation) return;
+    setBusy(true); setError("");
+    try {
+      await api.post(`${ENDPOINTS.RFQ.BASE}/${rfqId}/lifecycle`, { action, reason });
+      setMessage(({ PAUSE: "RFQ paused successfully.", RESUME: "RFQ resumed successfully.", COMPLETE: "RFQ completed successfully.", CANCEL: "RFQ cancelled successfully." })[action]);
+      await reload();
+    } catch (e) { setError(errorMessage(e, `Unable to ${labels[action]} RFQ`)); }
+    finally { setBusy(false); }
+  };
 
   const remove = async () => {
     if (!window.confirm(`Delete RFQ ${rfq.rfq_number}? This cannot be undone.`)) return;
@@ -131,6 +148,10 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
     onClose={onClose}
     actions={<>
       {rfq.permissions?.can_edit && <GhostButton type="button" onClick={() => setEditing(true)}><Pencil size={13} className="mr-1 inline" />Edit RFQ</GhostButton>}
+      {rfq.permissions?.can_update && lifecycleStatus === "ACTIVE" && <GhostButton type="button" disabled={busy} onClick={() => changeLifecycle("PAUSE")}><PauseCircle size={13} className="mr-1 inline" />Pause RFQ</GhostButton>}
+      {rfq.permissions?.can_update && lifecycleStatus === "PAUSED" && <PrimaryButton type="button" disabled={busy} onClick={() => changeLifecycle("RESUME")}><PlayCircle size={13} className="mr-1 inline" />Resume RFQ</PrimaryButton>}
+      {rfq.permissions?.can_update && ["ACTIVE", "PAUSED"].includes(lifecycleStatus) && <GhostButton type="button" disabled={busy} onClick={() => changeLifecycle("COMPLETE")}><CheckCircle2 size={13} className="mr-1 inline" />Complete RFQ</GhostButton>}
+      {rfq.permissions?.can_update && ["ACTIVE", "PAUSED"].includes(lifecycleStatus) && <button type="button" disabled={busy} onClick={() => changeLifecycle("CANCEL")} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 disabled:opacity-50"><Ban size={13} />Cancel RFQ</button>}
       {rfq.permissions?.can_delete && <button type="button" onClick={remove} className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50"><Trash2 size={13} />Delete</button>}
     </>}
   >
@@ -150,6 +171,7 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
         <div>
           <h3 className="text-sm font-black text-slate-900">RFQ Workflows</h3>
           <p className="mt-1 text-xs text-slate-600">RFQ creation does not start stages. Each batch starts only after parts are selected and an initial target date is set.</p>
+          <p className="mt-1 text-xs font-semibold text-slate-700">RFQ Status: <span className={lifecycleStatus === "ACTIVE" ? "text-emerald-700" : lifecycleStatus === "PAUSED" ? "text-amber-700" : "text-rose-700"}>{lifecycleStatus}</span></p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select aria-label="All Workflows" value={workflowDropdown} onChange={(event) => { setWorkflowDropdown(event.target.value); if (event.target.value) setActiveWorkflowId(event.target.value); }} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs text-slate-700">
@@ -160,7 +182,7 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
         </div>
       </div>
 
-      {showCreateWorkflow && <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+      {showCreateWorkflow && canCreateWorkflow && <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
         <div className="grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
           <div>
             <label className="mb-1 block text-xs font-bold text-slate-700">Initial Target Date <span className="text-rose-600">*</span></label>
@@ -209,7 +231,7 @@ export default function RfqDetailPage({ rfqId, user, onClose, onChanged }) {
               <td className="px-3 py-2 font-semibold text-emerald-700">{formatMoney(item.awarded_value)}</td>
               <td className="px-3 py-2">{item.current_stage ? stageLabel(item.current_stage) : "Not started"}</td>
               <td className="max-w-[220px] truncate px-3 py-2" title={item.latest_remark?.text}>{item.latest_remark?.text || "—"}</td>
-              <td className="px-3 py-2">{item.rfq_status || "—"}</td>
+              <td className="px-3 py-2">{item.lifecycle_status && item.lifecycle_status !== "IN_PROGRESS" ? item.lifecycle_status : (item.rfq_status || "IN_PROGRESS")}</td>
             </tr>)}
             {!workflows.length && <tr><td colSpan={8} className="px-3 py-5 text-center text-slate-500">No batch workflows yet. Create the first workflow when the required parts are ready.</td></tr>}
           </tbody>

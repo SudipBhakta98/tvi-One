@@ -34,7 +34,7 @@ const availableMonthKeys = async (scope) => {
 };
 
 const FILTER_FIELDS = ["customer", "project_name", "project_owner"];
-const LIST_FIELDS = "rfq_number customer project_owner project_lead project_name rfq_dated rfq_target_date stage_schedule main_parts main_part_no sub_part_no volume_per_annum_nos rfq_status current_stage costing stage_attachments stage_remarks createdAt updatedAt";
+const LIST_FIELDS = "rfq_number customer project_owner project_lead project_name rfq_dated rfq_target_date stage_schedule main_parts main_part_no sub_part_no volume_per_annum_nos rfq_status lifecycle_status current_stage costing stage_attachments stage_remarks createdAt updatedAt";
 const humanize = (value) => value.replaceAll("_", " ");
 const toOptions = (values) => values.filter(Boolean).sort((a, b) => a.localeCompare(b)).map((value) => ({ label: value, value }));
 
@@ -146,12 +146,12 @@ export const getAllRfqItems = async (req, res) => {
       .populate("project_owner", "name")
       .sort({ createdAt: -1 }).lean();
     const workflowRows = await RfqWorkflow.find({ parent_rfq: { $in: rows.map((row) => row._id) } })
-      .select("parent_rfq main_parts selected_parts current_stage rfq_status costing purchase_order stage_remarks stage_schedule")
+      .select("parent_rfq main_parts selected_parts current_stage rfq_status lifecycle_status costing purchase_order stage_remarks stage_schedule")
       .lean();
     const byRfq = new Map();
     for (const wf of workflowRows) {
       const key = String(wf.parent_rfq);
-      const current = byRfq.get(key) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED" };
+      const current = byRfq.get(key) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
       current.workflows += 1;
       const quote = Number(wf.costing?.quoted_price || 0);
       current.quoted += quote;
@@ -160,10 +160,11 @@ export const getAllRfqItems = async (req, res) => {
       if (remark && (!current.latest_remark || new Date(remark.createdAt) > new Date(current.latest_remark.createdAt))) current.latest_remark = remark;
       current.current_stage = wf.current_stage;
       current.rfq_status = wf.rfq_status || current.rfq_status;
+      current.lifecycle_status = wf.lifecycle_status || current.lifecycle_status;
       byRfq.set(key, current);
     }
     let responseRows = rows.map(({ stage_remarks, ...row }) => {
-      const wf = byRfq.get(String(row._id)) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED" };
+      const wf = byRfq.get(String(row._id)) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
       return {
         ...row,
         project_owner_name: row.project_owner?.name || row.project_lead,
@@ -175,6 +176,7 @@ export const getAllRfqItems = async (req, res) => {
         latest_remark: wf.latest_remark,
         current_stage: wf.workflows ? wf.current_stage : null,
         rfq_status: wf.workflows ? wf.rfq_status : "NOT_STARTED",
+        lifecycle_status: row.lifecycle_status || "ACTIVE",
         current_due_date: null,
         current_stage_status: "NOT_STARTED",
         stage_schedule: [],
@@ -324,6 +326,9 @@ export const addRemark = async (req, res) => {
   try {
     const { stage, text } = req.body;
     if (!WORKFLOW_STAGES.includes(stage)) throw new Error("Invalid workflow stage");
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    await assertWorkflowCanMutate(workflow, req.params.rfqItemID);
     if (!text?.trim()) throw new Error("Remark cannot be empty");
     const row = await RfqItem.findByIdAndUpdate(
       req.params.rfqItemID,
@@ -348,7 +353,7 @@ export const getRfqReport = async (req, res) => {
 export const getRfqWorkflows = async (req, res) => {
   try {
     const rows = await RfqWorkflow.find({ parent_rfq: req.params.rfqItemID })
-      .select("workflow_number workflow_name rfq_number project_name customer selected_parts main_parts current_stage rfq_status stage_schedule costing purchase_order stage_remarks createdAt updatedAt linked_project")
+      .select("workflow_number workflow_name rfq_number project_name customer selected_parts main_parts current_stage rfq_status lifecycle_status stage_schedule costing purchase_order stage_remarks createdAt updatedAt linked_project")
       .sort({ createdAt: 1 }).lean();
     res.json(rows.map((row) => {
       const selectedParts = (row.selected_parts || []).map((part) => {
@@ -365,6 +370,7 @@ export const getRfqWorkflows = async (req, res) => {
       quoted_value: Number(row.costing?.quoted_price || 0),
       awarded_value: row.rfq_status === "AWARDED" ? Number(row.costing?.quoted_price || 0) * Number(row.purchase_order?.po_qty || 1) : 0,
       latest_remark: (row.stage_remarks || []).slice(-1)[0] || null,
+      status: row.lifecycle_status || (row.current_stage === "COMPLETED" ? "COMPLETED" : "IN_PROGRESS"),
     };
     }));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -375,6 +381,7 @@ export const createRfqWorkflow = async (req, res) => {
     const parent = await RfqItem.findById(req.params.rfqItemID);
     if (!parent) return res.status(404).json({ error: "RFQ not found" });
     if (!canUpdateRfq(req.user, parent)) return res.status(403).json({ error: "You do not have permission to create a workflow for this RFQ" });
+    if ((parent.lifecycle_status || "ACTIVE") !== "ACTIVE") return res.status(409).json({ error: `Cannot create a workflow while RFQ is ${String(parent.lifecycle_status).toLowerCase()}` });
     const initialDate = new Date(req.body.initial_target_date);
     if (!req.body.initial_target_date || Number.isNaN(initialDate.getTime())) throw new Error("A valid initial target date is required before starting the workflow");
     const selection = req.body.selected_parts;
@@ -430,6 +437,9 @@ export const createRfqWorkflow = async (req, res) => {
     source.workflow_name = workflowNumber;
     source.initial_target_date = initialDate;
     source.workflow_started = true;
+    source.lifecycle_status = "IN_PROGRESS";
+    source.paused_by_parent = false;
+    source.status_before_parent_pause = undefined;
     source.main_parts = workflowParts;
     source.selected_parts = selectedParts;
     source.main_part_no = workflowParts[0].main_part_no;
@@ -467,6 +477,61 @@ export const createRfqWorkflow = async (req, res) => {
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }
 };
 
+export const updateRfqLifecycle = async (req, res) => {
+  try {
+    const rfq = await RfqItem.findById(req.params.rfqItemID);
+    if (!rfq) return res.status(404).json({ error: "RFQ not found" });
+    if (!canUpdateRfq(req.user, rfq)) return res.status(403).json({ error: "You do not have permission to change this RFQ status" });
+    const action = String(req.body.action || "").toUpperCase();
+    const reason = String(req.body.reason || "").trim();
+    const current = rfq.lifecycle_status || "ACTIVE";
+    const allowed = { PAUSE: ["ACTIVE"], RESUME: ["PAUSED"], COMPLETE: ["ACTIVE", "PAUSED"], CANCEL: ["ACTIVE", "PAUSED"] };
+    if (!allowed[action]) return res.status(400).json({ error: "Invalid RFQ action" });
+    if (!allowed[action].includes(current)) return res.status(409).json({ error: `Cannot ${action.toLowerCase()} an RFQ in ${current} status` });
+    if (["PAUSE", "COMPLETE", "CANCEL"].includes(action) && !reason) return res.status(400).json({ error: "Please provide a reason" });
+    const now = new Date();
+    const workflows = await RfqWorkflow.find({ parent_rfq: rfq._id });
+    if (action === "PAUSE") {
+      rfq.lifecycle_status = "PAUSED";
+      for (const workflow of workflows) {
+        if ((workflow.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS") {
+          workflow.status_before_parent_pause = "IN_PROGRESS";
+          workflow.lifecycle_status = "PAUSED";
+          workflow.paused_by_parent = true;
+          workflow.lifecycle_updated_at = now;
+          await workflow.save();
+        }
+      }
+    } else if (action === "RESUME") {
+      rfq.lifecycle_status = "ACTIVE";
+      for (const workflow of workflows) {
+        if (workflow.lifecycle_status === "PAUSED" && workflow.paused_by_parent) {
+          workflow.lifecycle_status = workflow.status_before_parent_pause || "IN_PROGRESS";
+          workflow.status_before_parent_pause = undefined;
+          workflow.paused_by_parent = false;
+          workflow.lifecycle_updated_at = now;
+          await workflow.save();
+        }
+      }
+    } else {
+      rfq.lifecycle_status = action === "COMPLETE" ? "COMPLETED" : "CANCELLED";
+      for (const workflow of workflows) {
+        if ((workflow.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS" || (workflow.lifecycle_status === "PAUSED" && workflow.paused_by_parent)) {
+          workflow.lifecycle_status = action === "COMPLETE" ? "STOPPED_BY_RFQ_COMPLETION" : "STOPPED_BY_RFQ_CANCELLATION";
+          workflow.paused_by_parent = false;
+          workflow.status_before_parent_pause = undefined;
+          workflow.lifecycle_updated_at = now;
+          await workflow.save();
+        }
+      }
+    }
+    rfq.lifecycle_updated_at = now;
+    rfq.lifecycle_reason = reason || (action === "RESUME" ? "RFQ resumed" : "");
+    await rfq.save();
+    res.json({ success: true, message: `RFQ ${action.toLowerCase()} successful`, lifecycle_status: rfq.lifecycle_status });
+  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+};
+
 export const getRfqWorkflowInstance = async (req, res) => {
   try {
     const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID })
@@ -482,7 +547,13 @@ export const getRfqWorkflowInstance = async (req, res) => {
         return { ...main, workflow_selected_main_part: Boolean(selection?.main_part_selected || legacyWholeMain) };
       });
     }
-    res.json({ ...summary, permissions: permissionsFor(req.user, workflow) });
+    const parent = await RfqItem.findById(req.params.rfqItemID).select("lifecycle_status").lean();
+    const lifecycleStatus = workflow.lifecycle_status || (workflow.current_stage === "COMPLETED" ? "COMPLETED" : "IN_PROGRESS");
+    const permissions = permissionsFor(req.user, workflow);
+    const workflowActive = lifecycleStatus === "IN_PROGRESS" && (parent?.lifecycle_status || "ACTIVE") === "ACTIVE";
+    permissions.can_update = permissions.can_update && workflowActive;
+    permissions.can_edit = permissions.can_edit && workflowActive;
+    res.json({ ...summary, lifecycle_status: lifecycleStatus, parent_lifecycle_status: parent?.lifecycle_status || "ACTIVE", permissions });
   } catch (e) { res.status(500).json({ error: e.message }); }
 };
 
@@ -490,15 +561,28 @@ export const transitionWorkflowInstance = async (req, res) => {
   try {
     const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
     if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    const parent = await RfqItem.findById(req.params.rfqItemID).select("lifecycle_status");
+    if (parent?.lifecycle_status !== "ACTIVE") throw new Error(`Parent RFQ is ${String(parent?.lifecycle_status || "ACTIVE").toLowerCase()} and workflow stages are locked`);
+    if (workflow.lifecycle_status !== "IN_PROGRESS") throw new Error(`Workflow is ${String(workflow.lifecycle_status || "IN_PROGRESS").toLowerCase().replaceAll("_", " ")} and cannot advance`);
     const result = await transitionRfq(workflow._id, req.body.stage, req.body.data || {}, req.user, RfqWorkflow);
+    if (result?.rfq?.current_stage === "COMPLETED") { workflow.lifecycle_status = "COMPLETED"; workflow.lifecycle_updated_at = new Date(); await workflow.save(); }
     res.json({ success: true, message: `${req.body.stage} completed`, ...result });
   } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+};
+
+const assertWorkflowCanMutate = async (workflow, parentRfqId) => {
+  const parent = await RfqItem.findById(parentRfqId).select("lifecycle_status").lean();
+  if (!parent || (parent.lifecycle_status || "ACTIVE") !== "ACTIVE") throw new Error("Parent RFQ is not active; workflow changes are locked");
+  if ((workflow.lifecycle_status || "IN_PROGRESS") !== "IN_PROGRESS") throw new Error("Workflow is not in progress; workflow changes are locked");
 };
 
 export const addWorkflowRemark = async (req, res) => {
   try {
     const { stage, text } = req.body;
     if (!WORKFLOW_STAGES.includes(stage)) throw new Error("Invalid workflow stage");
+    const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
+    if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    await assertWorkflowCanMutate(workflow, req.params.rfqItemID);
     if (!text?.trim()) throw new Error("Remark cannot be empty");
     const row = await RfqWorkflow.findOneAndUpdate(
       { _id: req.params.workflowID, parent_rfq: req.params.rfqItemID },
@@ -514,6 +598,7 @@ export const editWorkflowStage = async (req, res) => {
   try {
     const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
     if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    await assertWorkflowCanMutate(workflow, req.params.rfqItemID);
     if (!permissionsFor(req.user, workflow).can_edit) return res.status(403).json({ error: "You do not have permission to edit submitted stages" });
     const result = await editStageRecord(workflow._id, req.params.stage, req.body, RfqWorkflow);
     res.json({ success: true, message: "Workflow stage updated", rfqItem: result });
@@ -524,6 +609,7 @@ export const workflowPurchaseItems = async (req, res) => {
   try {
     const workflow = await RfqWorkflow.findOne({ _id: req.params.workflowID, parent_rfq: req.params.rfqItemID });
     if (!workflow) return res.status(404).json({ error: "Workflow not found" });
+    await assertWorkflowCanMutate(workflow, req.params.rfqItemID);
     const updated = await savePurchaseItems(workflow._id, req.body.stage, req.body.items, req.user, RfqWorkflow);
     res.json({ success: true, message: "Workflow purchase items saved", purchase_items: updated.purchase_items });
   } catch (e) { res.status(400).json({ error: e.message }); }

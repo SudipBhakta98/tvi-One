@@ -1,7 +1,7 @@
 import express from "express";
 import {
   createRfqItem, getAllRfqItems, getRfqItemById, updateRfqItem, deleteRfqItem, getOwners, getFilterOptions, getRfqReport,
-  getRfqWorkflows, createRfqWorkflow, getRfqWorkflowInstance, transitionWorkflowInstance, addWorkflowRemark, editWorkflowStage, workflowPurchaseItems,
+  getRfqWorkflows, createRfqWorkflow, getRfqWorkflowInstance, transitionWorkflowInstance, addWorkflowRemark, editWorkflowStage, workflowPurchaseItems, updateRfqLifecycle,
 } from "../controllers/rfqController.js";
 import { allowRoles, loadRfq, CREATE_ROLES, EDIT_ROLES, DELETE_ROLES, REPORT_ROLES } from "../services/rfqPermissions.js";
 
@@ -18,6 +18,7 @@ router.get("/report", allowRoles(...REPORT_ROLES), getRfqReport);
 router.post("/", allowRoles(...CREATE_ROLES), createRfqItem);
 router.get("/", getAllRfqItems);
 router.get("/:rfqItemID/workflows", getRfqWorkflows);
+router.post("/:rfqItemID/lifecycle", updateRfqLifecycle);
 router.post("/:rfqItemID/workflows", createRfqWorkflow);
 router.get("/:rfqItemID/workflows/:workflowID", getRfqWorkflowInstance);
 router.post("/:rfqItemID/workflows/:workflowID/transition", transitionWorkflowInstance);
