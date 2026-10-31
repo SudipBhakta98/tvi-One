@@ -12,22 +12,53 @@ const LINK_FILE_TYPE = "link";
 const linkToAttachment = (url) => ({ file_name: url.split("/").filter(Boolean).pop(), file_type: LINK_FILE_TYPE, file_size: 0, url });
 
 
-const attachmentUrl = (file) => file.url || (file.file_path ? `${ENDPOINTS.RFQ.BASE}/attachments/${encodeURIComponent(file.file_path.split(/[\\/]/).pop())}` : "");
-const openAttachment = async (file, download = false) => {
+const FILE_SEPARATORS = /[\\/]/;
+const PREVIEWABLE = /\.(pdf|png|jpe?g|gif|webp|txt)$/i;
+
+/**
+ * Where a stored attachment can be fetched from.
+ * - External links / cloud URLs (absolute http/https) are used as they are.
+ * - Locally stored files are always requested through the RFQ attachments endpoint, built from the stored file name.
+ *   (The saved `url` starts with "/api/…", which breaks when the API client already adds the "/api" prefix.)
+ */
+export const attachmentUrl = (file) => {
+  const raw = file?.url || "";
+  if (/^https?:\/\//i.test(raw)) return raw;
+  const name = String(file?.file_path || raw).split(FILE_SEPARATORS).filter(Boolean).pop();
+  if (!name) return "";
+  let plain = name;
+  try { plain = decodeURIComponent(name); } catch { /* already plain */ }
+  return `${ENDPOINTS.RFQ.BASE}/attachments/${encodeURIComponent(plain)}`;
+};
+
+/** Readable reason for a failed open / download, so users and developers can see what went wrong. */
+export const attachmentError = (error, verb) => {
+  const status = error?.response?.status;
+  const reason = status === 404 ? "file not found on the server" : status === 401 || status === 403 ? "you are not allowed to access this file" : status ? `server error ${status}` : error?.message || "network error";
+  return `Unable to ${verb} this attachment — ${reason}.`;
+};
+
+export const openAttachment = async (file, download = false) => {
   const url = attachmentUrl(file);
-  if (!url) return;
+  if (!url) throw new Error("this file has no stored location");
   if (/^https?:\/\//i.test(url)) { window.open(url, "_blank", "noopener,noreferrer"); return; }
-  const popup = download ? null : window.open("about:blank", "_blank");
-  const response = await api.get(`${url}${download ? "?download=1" : ""}`, { responseType: "blob" });
-  const blobUrl = window.URL.createObjectURL(response.data);
-  if (download) {
-    const anchor = document.createElement("a"); anchor.href = blobUrl; anchor.download = file.file_name || "attachment"; document.body.appendChild(anchor); anchor.click(); anchor.remove();
-  } else if (popup) popup.location.href = blobUrl;
-  window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+  const saveToDisk = download || !PREVIEWABLE.test(file.file_name || "");   // Excel / Word files cannot be shown in a tab, so "View" downloads them
+  const popup = saveToDisk ? null : window.open("about:blank", "_blank");
+  try {
+    const response = await api.get(url, { responseType: "blob" });
+    const blobUrl = window.URL.createObjectURL(response.data);
+    if (saveToDisk) {
+      const anchor = document.createElement("a"); anchor.href = blobUrl; anchor.download = file.file_name || "attachment"; document.body.appendChild(anchor); anchor.click(); anchor.remove();
+    } else if (popup) popup.location.href = blobUrl;
+    window.setTimeout(() => window.URL.revokeObjectURL(blobUrl), 60000);
+  } catch (error) {
+    if (popup) popup.close();   // do not leave a blank tab behind
+    throw error;
+  }
 };
 const AttachmentActions = ({ file }) => <span className="flex shrink-0 items-center gap-2">
-  <button type="button" onClick={() => openAttachment(file).catch(() => window.alert("Unable to open attachment"))} className="font-semibold text-indigo-600 hover:underline">View</button>
-  <button type="button" onClick={() => openAttachment(file, true).catch(() => window.alert("Unable to download attachment"))} className="font-semibold text-indigo-600 hover:underline">Download</button>
+  <button type="button" onClick={() => openAttachment(file).catch((e) => window.alert(attachmentError(e, "open")))} className="font-semibold text-indigo-600 hover:underline">View</button>
+  <button type="button" onClick={() => openAttachment(file, true).catch((e) => window.alert(attachmentError(e, "download")))} className="font-semibold text-indigo-600 hover:underline">Download</button>
 </span>;
 
 /** Read-only attachment list (used in stage cards and the details dialog). */

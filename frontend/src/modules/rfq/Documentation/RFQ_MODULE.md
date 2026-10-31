@@ -154,3 +154,15 @@ Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Produc
 ## Parent RFQ lifecycle controls
 
 The RFQ detail page exposes Pause, Resume, Complete, and Cancel actions. Pause temporarily locks workflow stage actions and records which child workflows were paused by the parent. Resume restores only those workflows to `IN_PROGRESS` without changing their current stage or stage history. Complete and Cancel stop running child workflows with terminal lifecycle statuses while keeping workflow records and history viewable. The RFQ register displays the parent RFQ lifecycle status independently of each workflow's customer/commercial `rfq_status`.
+
+## Detailed RFQ report (`RfqReportView`)
+
+Opened from the RFQ detail page (`GET /rfq/:id/report`). Every section is always expanded — no drop-downs — so the page prints as a complete record.
+
+- **Header & KPIs:** RFQ identity, owner, status, overall stage-completion ring, workflow / awarded / lost counts, delayed stages, remark and attachment totals, quoted and awarded value.
+- **Workflow Progress:** all 20 stages per workflow, each with a status badge and two labelled date boxes. Empty dates are never shown as "—": *Target* reads "Not set — target date not given" (or "Not applicable — customer / event driven"), *Completed* reads "Not completed yet — in progress / overdue / on hold" or "Not started yet". Completed stages show days late / early / on time. Stage-specific facts (quoted price, decision, PO, handover, purchase items) appear under the dates.
+- **Remarks & attachments** are listed under their stage, plus a combined **Remarks Log** and a **Document Register**. Images show thumbnails; images and PDFs preview in a modal; other files download.
+- **Activity Timeline:** completed-stage history with user names (workflow history is now populated server-side).
+- Filter chips (All / Done / In progress / Overdue / Upcoming) only hide stages on screen; printing is unaffected.
+
+Server: `getRfqDetailReport` adds the computed `status` to every `stage_schedule` entry, populates `stage_history.user` for workflows, orders workflows oldest-first, tags each attachment with its `source`, and returns `generated_at`.

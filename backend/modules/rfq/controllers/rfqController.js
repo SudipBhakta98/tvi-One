@@ -694,21 +694,32 @@ export const uploadRfqAttachments = async (req, res) => {
   } catch (error) { res.status(400).json({ success: false, error: error.message }); }
 };
 
+// Adds the computed status (DONE / DELAY_DONE / PENDING / DELAY_PENDING / WAITING) to every stage_schedule entry,
+// so the report can label stages exactly like the stage grid does.
+const withStageStatus = (doc) => ({
+  ...doc,
+  stage_attachments: doc.stage_attachments instanceof Map ? Object.fromEntries(doc.stage_attachments) : (doc.stage_attachments || {}),
+  stage_schedule: (doc.stage_schedule || []).map((item) => ({ ...item, status: getStageStatus(doc, item.stage) })),
+});
+
 export const getRfqDetailReport = async (req, res) => {
   try {
-    const rfq = await RfqItem.findOne({ _id: req.params.rfqItemID, ...rfqScope(req.user) })
+    const rfqDoc = await RfqItem.findOne({ _id: req.params.rfqItemID, ...rfqScope(req.user) })
       .populate("project_owner", "name email").populate("stage_history.user", "name").lean();
-    if (!rfq) return res.status(404).json({ error: "RFQ not found" });
-    const workflows = await RfqWorkflow.find({ parent_rfq: rfq._id }).lean();
+    if (!rfqDoc) return res.status(404).json({ error: "RFQ not found" });
+    const rfq = withStageStatus(rfqDoc);
+    const workflows = (await RfqWorkflow.find({ parent_rfq: rfq._id })
+      .populate("stage_history.user", "name").sort({ createdAt: 1 }).lean()).map(withStageStatus);
+    // Flat document register: every file in the RFQ, its parts and every workflow, tagged with where it came from.
     const attachments = [];
-    const addFiles = (stage, files = []) => files.forEach((file) => attachments.push({ ...file, stage }));
+    const addFiles = (stage, files = [], source = "RFQ") => files.forEach((file) => attachments.push({ ...file, stage, source }));
     Object.entries(rfq.stage_attachments || {}).forEach(([stage, files]) => addFiles(stage, files));
     (rfq.main_parts || []).forEach((part) => {
-      addFiles(`Main part ${part.main_part_no}`, part.drawing_attachments);
-      (part.sub_parts || []).forEach((sub) => addFiles(`Sub part ${sub.sub_part_no}`, sub.drawing_attachments));
+      addFiles(`Main part ${part.main_part_no}`, part.drawing_attachments, "Part drawing");
+      (part.sub_parts || []).forEach((sub) => addFiles(`Sub part ${sub.sub_part_no}`, sub.drawing_attachments, "Part drawing"));
     });
-    workflows.forEach((workflow) => Object.entries(workflow.stage_attachments || {}).forEach(([stage, files]) => addFiles(`${workflow.workflow_number} · ${stage}`, files)));
-    res.json({ rfq, workflows, attachments });
+    workflows.forEach((workflow) => Object.entries(workflow.stage_attachments || {}).forEach(([stage, files]) => addFiles(`${workflow.workflow_number} · ${stage}`, files, workflow.workflow_number || "Workflow")));
+    res.json({ rfq, workflows, attachments, generated_at: new Date().toISOString() });
   } catch (error) { res.status(500).json({ error: error.message }); }
 };
 
