@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Settings2,
   BarChart3,
+  CalendarCheck,
   Menu,
 } from "lucide-react";
 import { useAuth } from "../modules/auth/contexts/AuthContext";
@@ -172,6 +173,16 @@ const groups = [
   ]
 },
   {
+    label: "Attendance",
+    icon: CalendarCheck,
+    path: "/attendance",
+    allowed: DEPARTMENT_ROLES.HR,
+    children: [
+      { label: "Attendance Dashboard", to: "/attendance" },
+      { label: "Upload Attendance Logs", to: "/attendance?upload=1", create: true, allowed: [ROLES.HR_MANAGER] },
+    ],
+  },
+  {
     label: "Reports",
     icon: BarChart3,
     path: "/reports",
@@ -326,7 +337,7 @@ export default function AppLayout() {
   }, []);
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-slate-50 text-slate-900 overflow-hidden font-sans">
+    <div className="w-screen h-screen flex flex-col bg-slate-100 text-slate-900 overflow-hidden font-sans">
       {navMode && (
         <>
           <div className="fixed inset-0 z-[55] bg-slate-900/30" onClick={() => setNavMode(null)} />

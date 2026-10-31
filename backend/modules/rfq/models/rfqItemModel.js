@@ -1,16 +1,17 @@
 import mongoose from "mongoose";
 import {
   DOCUMENT_STATUS, REVIEW_STATUS, FEASIBILITY_STATUS, TOOLING_CATEGORY, COSTING_STATUS,
-  RFQ_STATUS, PROTO_BUILD_STATUS, CAPEX_STATUS, PILOT_BUILD_STATUS, MASS_PRODUCTION_STATUS,
+  RFQ_STATUS, REGISTER_STATUS, PROTO_BUILD_STATUS, CAPEX_STATUS, PILOT_BUILD_STATUS, MASS_PRODUCTION_STATUS,
   CURRENT_STAGE, PROJECT_LIFECYCLE_STATUS, HALF_VOLUME_SPLIT_RATIO, WORKFLOW_STAGES,
-} from "../../../constants/rfqEnums.js";
+} from "../rfqEnums.js";
 
 const attachmentSchema = new mongoose.Schema({
   file_name: { type: String, required: true, trim: true },
   file_type: { type: String, default: "" },
   file_size: { type: Number, default: 0, min: 0 },
   url: { type: String, default: "" },
-  storage_provider: { type: String, enum: ["PENDING_CLOUD_UPLOAD", "CLOUD"], default: "PENDING_CLOUD_UPLOAD" },
+  file_path: { type: String, default: "" },
+  storage_provider: { type: String, enum: ["PENDING_CLOUD_UPLOAD", "CLOUD", "LOCAL", "S3"], default: "LOCAL" },
   uploaded_at: { type: Date, default: Date.now },
 }, { _id: true });
 
@@ -61,11 +62,21 @@ const stageRemarkSchema = new mongoose.Schema({
 }, { _id: true, timestamps: { createdAt: true, updatedAt: false } });
 
 const rfqItemSchema = new mongoose.Schema({
-  rfq_number: { type: String, required: true, trim: true, index: true },
+  rfq_number: { type: String, required: true, trim: true },
+  register_status: { type: String, enum: REGISTER_STATUS, default: "PENDING", index: true },
   project_status: { type: String, enum: PROJECT_LIFECYCLE_STATUS, default: "ACTIVE" },
   lifecycle_status: { type: String, enum: ["ACTIVE", "PAUSED", "COMPLETED", "CANCELLED"], default: "ACTIVE", index: true },
   lifecycle_updated_at: Date, lifecycle_reason: { type: String, default: "" },
   customer: { type: String, required: true, trim: true },
+  rfq_send_by_name: { type: String, required: true, trim: true },
+  rfq_send_by_contact_number: { type: String, required: true, trim: true },
+  rfq_send_by_email: {
+    type: String,
+    required: true,
+    trim: true,
+    lowercase: true,
+    match: [/^[^\s@]+@[^\s@]+\.[^\s@]+$/, "Please provide a valid RFQ sender email"],
+  },
   // project_owner is the source of truth; project_lead is the owner's name, kept in sync server-side for downstream modules.
   project_owner: { type: mongoose.Schema.Types.ObjectId, ref: "User", index: true },
   project_lead: { type: String, required: true, trim: true },
@@ -75,6 +86,7 @@ const rfqItemSchema = new mongoose.Schema({
   rfq_target_date: Date,
   // RFQs are intake records only. Workflow stages are initialized after an explicit batch start.
   workflow_started: { type: Boolean, default: false },
+  workflow_creation_lock_until: { type: Date, default: undefined, select: false },
   stage_schedule: { type: [stageScheduleSchema], default: [] },
 
   // Hierarchy: one RFQ -> many main parts -> many sub parts.
@@ -110,9 +122,10 @@ const rfqItemSchema = new mongoose.Schema({
   remarks: String, linked_project: { type: mongoose.Schema.Types.ObjectId, ref: "Project" },
   stage_history: { type: [stageHistorySchema], default: [] },
   stage_remarks: { type: [stageRemarkSchema], default: [] },
-}, { timestamps: true });
+}, { timestamps: true, optimisticConcurrency: true });
 
-rfqItemSchema.index({ rfq_status: 1, createdAt: -1 });
+rfqItemSchema.index({ rfq_number: 1 }, { unique: true });
+rfqItemSchema.index({ register_status: 1, createdAt: -1 });
 rfqItemSchema.index({ current_stage: 1, createdAt: -1 });
 
 rfqItemSchema.virtual("volume_half_annum_nos").get(function () { return Math.round(this.volume_per_annum_nos * HALF_VOLUME_SPLIT_RATIO); });

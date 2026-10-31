@@ -47,6 +47,14 @@ const WarehouseProvider = lazy(() =>
     default: m.WarehouseProvider,
   })),
 );
+const AttendancePage = lazy(
+  () => import("./modules/attendance/pages/AttendancePage"),
+);
+const AttendanceProvider = lazy(() =>
+  import("./modules/attendance/contexts/AttendanceContext").then((m) => ({
+    default: m.AttendanceProvider,
+  })),
+);
 const DispatchPage = lazy(
   () => import("./modules/dispatch/pages/DispatchPage"),
 );
@@ -150,6 +158,15 @@ export default function App() {
               path="/dispatch"
               element={
                 <ModuleRoute Provider={DispatchProvider} Page={DispatchPage} />
+              }
+            />
+            <Route
+              path="/attendance"
+              element={
+                <ModuleRoute
+                  Provider={AttendanceProvider}
+                  Page={AttendancePage}
+                />
               }
             />
             <Route path="/account" element={<AccountPage />} />

@@ -4,6 +4,8 @@ import RfqItem from "./rfqItemModel.js";
 // Keep the same lifecycle fields and validation as RfqItem, but persist every
 // workflow instance in its own collection so stage progress/history are isolated.
 const workflowSchema = RfqItem.schema.clone();
+// Parent RFQ numbers are unique, but many workflow documents intentionally share that RFQ number.
+workflowSchema.clearIndexes();
 workflowSchema.add({
   parent_rfq: { type: mongoose.Schema.Types.ObjectId, ref: "RfqItem", required: true },
   workflow_number: { type: String, trim: true },

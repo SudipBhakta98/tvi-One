@@ -13,10 +13,12 @@
     "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "exceljs": "^3.4.0",
     "express": "^5.2.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^9.6.2",
-    "morgan": "^1.12.1"
+    "morgan": "^1.12.1",
+    "multer": "^2.5.0"
   }
 }

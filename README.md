@@ -70,6 +70,7 @@ TVI One
     │   ├── production
     │   ├── warehouse
     │   ├── dispatch
+    │   ├── attendance
     │   └── dashboard
     └── server.js
 ```
@@ -86,13 +87,12 @@ TVI One
 | Production | Manufacturing output and QC |
 | Warehouse | GRN, receipts and inspection |
 | Dispatch | Finished-goods movement |
+| Attendance (HR) | Biometric attendance upload, daily / previous-day reports, late / early / miss-punch tracking, Excel export (`HR_MANAGER`, `HR_USER`) |
 | Dashboard | Cross-functional KPIs |
 
 Future modules can be added without changing the existing domain folders:
 
 ```text
-modules/attendance
-modules/finance
 modules/customer
 ```
 

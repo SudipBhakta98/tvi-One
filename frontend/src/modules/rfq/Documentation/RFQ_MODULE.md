@@ -45,14 +45,14 @@ Only the open stage is actionable; stages complete strictly in order.
 | 19 | Define Actual BOM | yes | **Add BOM** dialog; at least one line before completing |
 | 20 | Mass Production Handover | yes | **Convert to Project** |
 
-Files/links added on the Create page are saved on stage 1 (Customer RFQ Received). Initial target dates (stages 1–8) are set on the Create page. Every later phase's dates are collected in the dialog at stages 9, 13 and 17.
+Files/links added on the Create page are saved on stage 1 (Customer RFQ Received). Initial target dates for stages 2–8 are set when starting a batch workflow. Every later phase's dates are collected in the dialog at stages 9, 13 and 17.
 
 ## 4. Attachments and remarks
 
 - Every stage accepts attachments: choose files (Excel, PDF, Word, text, images) and/or paste a link.
-- Files are stored as **metadata only** (name, type, size) with `storage_provider: PENDING_CLOUD_UPLOAD`; a pasted link is saved in `url`. Cloud upload (S3) is a later step — set `url` and `storage_provider: CLOUD` when it is added.
-- Attachments are **mandatory** on stages 9, 13, 17, 18 (customer evidence — label "Costing sheet & documents"); optional elsewhere. To require them on more stages add the stage key to `ATTACHMENT_REQUIRED_STAGES` in `server/rfq/services/rfqWorkflow.js`.
-- Remarks are stored with the stage's history entry (who, when, note).
+- Uploaded files are stored on the configured local upload volume with persisted file paths and authenticated view/download routes; pasted links remain external links.
+- Attachments are mandatory at RFQ intake, on each main/sub-part drawing field, and on every workflow stage after Stage 1.
+- Remarks are optional; when added, they are stored with the stage history (who, when, note).
 
 ## 5. Dialogs
 
@@ -140,8 +140,8 @@ Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Produc
 ## Batch workflow model (updated)
 
 - Creating an RFQ is intake-only. It saves customer/project details, the part hierarchy, drawings, and RFQ-level attachments; it does not initialize stage targets/history or start a lifecycle.
-- Open an RFQ to see consolidated values and its batch-workflow register. Start a workflow only through **Create Batch Workflow** after selecting available main parts and/or subparts and supplying the initial target date.
-- The initial target date becomes the target date for the first active stage, `DOCUMENT_REVIEW`. `CUSTOMER_RFQ_RECEIVED` is recorded as completed when the user explicitly starts the workflow. Each later target-date stage asks for its own target date when that stage becomes active; customer/event stages remain customer-driven. The existing 20-stage process and stage gates remain in place.
+- Open an RFQ to see consolidated values and its batch-workflow register. Start a workflow only through **Create Batch Workflow** after selecting available main parts and/or subparts and supplying target dates for stages 2 through 8.
+- At workflow start, users provide target dates for stages 2 through 8 (`DOCUMENT_REVIEW` through `RFQ_SUBMITTED`). `CUSTOMER_RFQ_RECEIVED` is recorded as completed when the user explicitly starts the workflow. Each later target-date stage asks for its own target date when that stage becomes active; customer/event stages remain customer-driven. The existing 20-stage process and stage gates remain in place.
 - Main-part selection and subpart selection are independent. A main part or subpart already assigned to any workflow is disabled in the UI and rejected by the API if submitted again. Different, unassigned subparts under the same parent main part can be assigned to other workflows.
 - Workflow numbers are generated as `<RFQ number>-WF-001`, `<RFQ number>-WF-002`, etc. Every workflow owns its own stage schedule, progress, remarks, attachments, costing, PO information, and BOM.
 - RFQ register values are consolidated from child workflows. Quoted value is the sum of workflow quotes; awarded value is the sum of awarded workflow quote × PO quantity (or × 1 when a PO quantity is not recorded yet).
@@ -149,7 +149,7 @@ Purchasing, Warehouse (GRN / invoice → purchase accept → finance) and Produc
 
 ### Workflow creation request
 
-`POST /:rfqItemID/workflows` accepts `{ initial_target_date, selected_parts }`, where each selection has `main_part_id`, `main_part_selected` (boolean), and `sub_part_ids` (array). The API validates part ownership, rejects duplicate assignments, and requires a valid initial target date.
+`POST /:rfqItemID/workflows` accepts `{ initial_target_dates, selected_parts }`, where each selection has `main_part_id`, `main_part_selected` (boolean), and `sub_part_ids` (array). The API validates part ownership, rejects duplicate assignments, and requires a valid target date for each of stages 2 through 8.
 
 ## Parent RFQ lifecycle controls
 

@@ -22,13 +22,13 @@ import RfqDashboardTab from "./RfqDashboardTab";
 import FinanceDashboardTab from "./FinanceDashboardTab";
 
 const TABS = [
-  ["overview", "Overview", Activity],
+  // ["overview", "Overview", Activity],
   ["rfq", "RFQ & NPD", FileText],
-  ["projects", "Projects", FolderKanban],
-  ["production", "Production", Factory],
-  ["purchase", "Purchase", ShoppingCart],
-  ["warehouse", "Warehouse", Warehouse],
-  ["dispatch", "Dispatch", Truck],
+  // ["projects", "Projects", FolderKanban],
+  // ["production", "Production", Factory],
+  // ["purchase", "Purchase", ShoppingCart],
+  // ["warehouse", "Warehouse", Warehouse],
+  // ["dispatch", "Dispatch", Truck],
   ["finance", "Finance", Wallet],
 ];
 
@@ -77,9 +77,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-3 bg-slate-50 p-4">
       <PageHeader
-        eyebrow="Control Tower"
+        // eyebrow="Control Tower"
         title="TVI One Dashboard"
-        subtitle="One aggregated snapshot across RFQ, projects, SCM, production, warehouse, dispatch and finance."
+        // subtitle="One aggregated snapshot across RFQ, projects, SCM, production, warehouse, dispatch and finance."
       />
       
       <div className="flex flex-wrap items-end justify-between gap-2 rounded-xl border border-slate-200 bg-white p-2.5">

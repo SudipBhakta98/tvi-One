@@ -4,10 +4,15 @@ import Component from "../models/componentModel.js";
 import User from "../../auth/userModel.js";
 import { ROLES } from "../../../constants/roles.js";
 import { WORKFLOW_STAGES } from "../../../constants/rfqEnums.js";
-import { STAGES, TARGET_DATE_STAGES, getStageStatus, transitionRfq, editStage as editStageRecord, getWorkflowSummary, setPhaseTargets, savePurchaseItems } from "../services/rfqWorkflow.js";
-import { rfqScope, permissionsFor, reportDepartmentsFor, canUpdateRfq } from "../services/rfqPermissions.js";
+import { STAGES, TARGET_PHASES, TARGET_DATE_STAGES, getStageStatus, transitionRfq, editStage as editStageRecord, getWorkflowSummary, setPhaseTargets, savePurchaseItems } from "../services/rfqWorkflow.js";
+import { rfqScope, permissionsFor, reportDepartmentsFor, canUpdateRfq, RFQ_STATUS_ROLES, RFQ_EDIT_ROLES } from "../services/rfqPermissions.js";
 import { currentStageInfo } from "../services/rfqStageSummary.js";
 import { buildRfqReport } from "../services/rfqReport.js";
+import { generateRfqNumber } from "../services/rfqNumber.js";
+import { incrementCounter } from "../services/counter.js";
+import { serializeUploadedFile, uploadRootDirectory } from "../services/storage/index.js";
+import path from "node:path";
+import fs from "node:fs";
 
 // Multi-select filters travel as one query value, e.g. ?customer=Acme|Bosch ("|" cannot clash with names that contain commas).
 export const MULTI_VALUE_SEPARATOR = "|";
@@ -34,7 +39,7 @@ const availableMonthKeys = async (scope) => {
 };
 
 const FILTER_FIELDS = ["customer", "project_name", "project_owner"];
-const LIST_FIELDS = "rfq_number customer project_owner project_lead project_name rfq_dated rfq_target_date stage_schedule main_parts main_part_no sub_part_no volume_per_annum_nos rfq_status lifecycle_status current_stage costing stage_attachments stage_remarks createdAt updatedAt";
+const LIST_FIELDS = "rfq_number customer project_owner project_lead project_name rfq_dated rfq_target_date stage_schedule main_parts main_part_no sub_part_no volume_per_annum_nos rfq_status register_status lifecycle_status current_stage costing stage_attachments stage_remarks createdAt updatedAt";
 const humanize = (value) => value.replaceAll("_", " ");
 const toOptions = (values) => values.filter(Boolean).sort((a, b) => a.localeCompare(b)).map((value) => ({ label: value, value }));
 
@@ -82,22 +87,23 @@ const normalizePartHierarchy = (body) => {
   }
   normalized.main_parts = normalized.main_parts.map((main) => ({
     ...main,
+    main_part_no: String(main.main_part_no ?? "").trim().toUpperCase(),
     volume_per_annum_nos: Number(main.volume_per_annum_nos),
     sub_parts: Array.isArray(main.sub_parts) ? main.sub_parts.map((sub) => ({
-      ...sub, qty_per_main_part: Number(sub.qty_per_main_part || 1),
+      ...sub, sub_part_no: String(sub.sub_part_no ?? "").trim().toUpperCase(), qty_per_main_part: Number(sub.qty_per_main_part || 1),
     })) : [],
   }));
 
   const mainNos = new Set();
   for (const main of normalized.main_parts) {
     if (!main.main_part_no?.trim()) throw new Error("Every main part requires a main_part_no");
-    if (mainNos.has(main.main_part_no.trim())) throw new Error(`Duplicate main part number: ${main.main_part_no}`);
-    mainNos.add(main.main_part_no.trim());
+    if (mainNos.has(main.main_part_no.trim().toUpperCase())) throw new Error(`Duplicate main part number: ${main.main_part_no}`);
+    mainNos.add(main.main_part_no.trim().toUpperCase());
     const subNos = new Set();
     for (const sub of main.sub_parts) {
       if (!sub.sub_part_no?.trim()) throw new Error(`Every sub part under ${main.main_part_no} requires a sub_part_no`);
-      if (subNos.has(sub.sub_part_no.trim())) throw new Error(`Duplicate sub part ${sub.sub_part_no} under ${main.main_part_no}`);
-      subNos.add(sub.sub_part_no.trim());
+      if (subNos.has(sub.sub_part_no.trim().toUpperCase())) throw new Error(`Duplicate sub part ${sub.sub_part_no} under ${main.main_part_no}`);
+      subNos.add(sub.sub_part_no.trim().toUpperCase());
     }
   }
 
@@ -110,6 +116,17 @@ const normalizePartHierarchy = (body) => {
 export const createRfqItem = async (req, res) => {
   try {
     const body = normalizePartHierarchy(req.body);
+    if (!Array.isArray(body.stage_attachments?.CUSTOMER_RFQ_RECEIVED) || !body.stage_attachments.CUSTOMER_RFQ_RECEIVED.length) throw new Error("Upload at least one RFQ attachment");
+    for (const main of body.main_parts) {
+      if (!Array.isArray(main.drawing_attachments) || !main.drawing_attachments.length) throw new Error(`Upload at least one drawing for main part ${main.main_part_no}`);
+      for (const sub of main.sub_parts || []) if (!Array.isArray(sub.drawing_attachments) || !sub.drawing_attachments.length) throw new Error(`Upload at least one drawing for sub part ${sub.sub_part_no}`);
+    }
+    const requiredSenderFields = ["rfq_send_by_name", "rfq_send_by_contact_number", "rfq_send_by_email"];
+    for (const field of requiredSenderFields) {
+      if (!String(body[field] || "").trim()) {
+        return res.status(400).json({ success: false, error: `${field.replaceAll("_", " ")} is required` });
+      }
+    }
     const owner = await resolveOwner(body.project_owner);
     body.project_owner = owner._id;
     body.project_lead = owner.name;
@@ -118,8 +135,11 @@ export const createRfqItem = async (req, res) => {
     delete body.stage_history;
     delete body.current_stage;
     delete body.workflow_started;
+    const generatedNumber = await generateRfqNumber(body.rfq_dated, body.project_name);
     const rfqItem = await RfqItem.create({
       ...body,
+      rfq_number: generatedNumber,
+      register_status: "PENDING",
       workflow_started: false,
       current_stage: null,
       stage_schedule: [],
@@ -151,8 +171,11 @@ export const getAllRfqItems = async (req, res) => {
     const byRfq = new Map();
     for (const wf of workflowRows) {
       const key = String(wf.parent_rfq);
-      const current = byRfq.get(key) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
+      const current = byRfq.get(key) || { workflows: 0, active_workflows: 0, awarded_workflows: 0, lost_workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
       current.workflows += 1;
+      if ((wf.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS") current.active_workflows += 1;
+      if (wf.rfq_status === "AWARDED") current.awarded_workflows += 1;
+      if (wf.rfq_status === "LOST") current.lost_workflows += 1;
       const quote = Number(wf.costing?.quoted_price || 0);
       current.quoted += quote;
       if (wf.rfq_status === "AWARDED") current.awarded += Number(wf.purchase_order?.po_qty || 1) * quote;
@@ -164,7 +187,7 @@ export const getAllRfqItems = async (req, res) => {
       byRfq.set(key, current);
     }
     let responseRows = rows.map(({ stage_remarks, ...row }) => {
-      const wf = byRfq.get(String(row._id)) || { workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
+      const wf = byRfq.get(String(row._id)) || { workflows: 0, active_workflows: 0, awarded_workflows: 0, lost_workflows: 0, quoted: 0, awarded: 0, latest_remark: null, current_stage: null, rfq_status: "NOT_STARTED", lifecycle_status: "ACTIVE" };
       return {
         ...row,
         project_owner_name: row.project_owner?.name || row.project_lead,
@@ -173,9 +196,15 @@ export const getAllRfqItems = async (req, res) => {
         total_quoted_value: wf.quoted,
         total_awarded_value: wf.awarded,
         workflow_count: wf.workflows,
+        total_workflows: wf.workflows,
+        active_workflow_count: wf.active_workflows,
+        awarded_workflow_count: wf.awarded_workflows,
+        lost_workflow_count: wf.lost_workflows,
+        awarded_lost_workflow_count: wf.awarded_workflows + wf.lost_workflows,
         latest_remark: wf.latest_remark,
         current_stage: wf.workflows ? wf.current_stage : null,
         rfq_status: wf.workflows ? wf.rfq_status : "NOT_STARTED",
+        register_status: row.register_status || (wf.workflows ? "ACTIVE" : "PENDING"),
         lifecycle_status: row.lifecycle_status || "ACTIVE",
         current_due_date: null,
         current_stage_status: "NOT_STARTED",
@@ -184,8 +213,10 @@ export const getAllRfqItems = async (req, res) => {
     });
     const requestedStages = String(req.query.current_stage || "").split(MULTI_VALUE_SEPARATOR).filter(Boolean);
     const requestedStatuses = String(req.query.rfq_status || "").split(MULTI_VALUE_SEPARATOR).filter(Boolean);
+    const requestedRegisterStatuses = String(req.query.register_status || "").split(MULTI_VALUE_SEPARATOR).filter(Boolean);
     if (requestedStages.length) responseRows = responseRows.filter((row) => requestedStages.includes(row.current_stage || "NOT_STARTED"));
     if (requestedStatuses.length) responseRows = responseRows.filter((row) => requestedStatuses.includes(row.rfq_status));
+    if (requestedRegisterStatuses.length) responseRows = responseRows.filter((row) => requestedRegisterStatuses.includes(row.register_status));
     res.json(responseRows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -209,6 +240,7 @@ export const getFilterOptions = async (req, res) => {
       project_owner: owners.map((owner) => ({ label: owner.name, value: String(owner._id) })),
       current_stage: [{ label: "Not Started", value: "NOT_STARTED" }, ...workflowStages.filter(Boolean).map((stage) => ({ label: humanize(stage), value: stage }))],
       rfq_status: [...new Set([...workflowStatuses.filter(Boolean), "NOT_STARTED"])].map((status) => ({ label: humanize(status), value: status })),
+      register_status: ["PENDING", "ACTIVE", "HOLD", "CANCEL", "COMPLETED"].map((status) => ({ label: humanize(status), value: status })),
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 };
@@ -232,12 +264,20 @@ export const getRfqItemById = async (req, res) => {
 export const updateRfqItem = async (req, res) => {
   try {
     const body = { ...req.body };
+    delete body.rfq_number;
+    delete body.register_status;
     delete body.project_lead; // derived from project_owner below
     if (body.project_owner) {
       const owner = await resolveOwner(body.project_owner);
       body.project_lead = owner.name;
     } else delete body.project_owner;
-    if (body.main_parts) Object.assign(body, normalizePartHierarchy(body));
+    if (body.main_parts) {
+      Object.assign(body, normalizePartHierarchy(body));
+      for (const main of body.main_parts) {
+        if (!Array.isArray(main.drawing_attachments) || !main.drawing_attachments.length) throw new Error(`Upload at least one drawing for main part ${main.main_part_no}`);
+        for (const sub of main.sub_parts || []) if (!Array.isArray(sub.drawing_attachments) || !sub.drawing_attachments.length) throw new Error(`Upload at least one drawing for sub part ${sub.sub_part_no}`);
+      }
+    }
     // Target dates are fixed at RFQ creation. Completion dates are server-controlled by transitionRfq.
     [
       "stage_schedule", "stage_history", "stage_remarks", "current_stage", "customer_decision", "customer_approval_pilot", "technical_review", "feasibility_status",
@@ -377,13 +417,37 @@ export const getRfqWorkflows = async (req, res) => {
 };
 
 export const createRfqWorkflow = async (req, res) => {
+  let lockAcquired = false;
+  const parentId = req.params.rfqItemID;
+  const releaseLock = async () => {
+    if (lockAcquired) {
+      await RfqItem.updateOne({ _id: parentId }, { $unset: { workflow_creation_lock_until: 1 } });
+      lockAcquired = false;
+    }
+  };
   try {
     const parent = await RfqItem.findById(req.params.rfqItemID);
     if (!parent) return res.status(404).json({ error: "RFQ not found" });
-    if (!canUpdateRfq(req.user, parent)) return res.status(403).json({ error: "You do not have permission to create a workflow for this RFQ" });
-    if ((parent.lifecycle_status || "ACTIVE") !== "ACTIVE") return res.status(409).json({ error: `Cannot create a workflow while RFQ is ${String(parent.lifecycle_status).toLowerCase()}` });
-    const initialDate = new Date(req.body.initial_target_date);
-    if (!req.body.initial_target_date || Number.isNaN(initialDate.getTime())) throw new Error("A valid initial target date is required before starting the workflow");
+    if (!canUpdateRfq(req.user, parent)) return res.status(403).json({ error: "Only Scrum Master, Super User or Admin can start a workflow" });
+    if ((parent.lifecycle_status || "ACTIVE") !== "ACTIVE" || ["HOLD", "CANCEL", "COMPLETED"].includes(parent.register_status)) return res.status(409).json({ error: `Cannot create a workflow while RFQ is ${String(parent.register_status || parent.lifecycle_status).toLowerCase()}` });
+    // Lease-based parent lock prevents simultaneous workflow starts from claiming the same part.
+    const lockNow = new Date();
+    const lockedParent = await RfqItem.findOneAndUpdate(
+      { _id: parent._id, $or: [{ workflow_creation_lock_until: { $exists: false } }, { workflow_creation_lock_until: { $lt: lockNow } }] },
+      { $set: { workflow_creation_lock_until: new Date(lockNow.getTime() + 120000) } },
+      { new: true }
+    );
+    if (!lockedParent) return res.status(409).json({ error: "Another batch workflow is being created for this RFQ. Please retry shortly." });
+    lockAcquired = true;
+    const initialTargets = req.body.initial_target_dates;
+    const initialStages = TARGET_PHASES.INITIAL.filter((stage) => stage !== "CUSTOMER_RFQ_RECEIVED");
+    if (!Array.isArray(initialTargets)) throw new Error("Target dates for stages 2 through 8 are required before starting the workflow");
+    const initialDateMap = new Map(initialTargets.map((item) => [item.stage, item.target_date]));
+    if (initialTargets.length !== initialStages.length || initialStages.some((stage) => !initialDateMap.has(stage) || !initialDateMap.get(stage) || Number.isNaN(new Date(initialDateMap.get(stage)).getTime()))) {
+      throw new Error("Provide a valid target date for every stage from Stage 2 through Stage 8");
+    }
+    for (const stage of initialDateMap.keys()) if (!initialStages.includes(stage)) throw new Error(`Invalid initial target date stage: ${stage}`);
+    const initialDate = new Date(initialDateMap.get("DOCUMENT_REVIEW"));
     const selection = req.body.selected_parts;
     if (!Array.isArray(selection) || selection.length === 0) throw new Error("Select at least one main part or subpart");
 
@@ -428,8 +492,9 @@ export const createRfqWorkflow = async (req, res) => {
     }
     if (!selectedParts.length) throw new Error("Select at least one main part or subpart");
 
-    const workflowCount = await RfqWorkflow.countDocuments({ parent_rfq: parent._id });
-    const workflowNumber = `${parent.rfq_number}-WF-${String(workflowCount + 1).padStart(3, "0")}`;
+    // Atomic per-RFQ workflow numbering; safe when two users start workflows concurrently.
+    const workflowCounter = await incrementCounter(`workflow:${parent._id}`);
+    const workflowNumber = `${parent.rfq_number}-WF-${String(workflowCounter.sequence).padStart(3, "0")}`;
     const source = parent.toObject();
     ["_id", "__v", "createdAt", "updatedAt", "linked_project"].forEach((key) => delete source[key]);
     source.parent_rfq = parent._id;
@@ -466,70 +531,75 @@ export const createRfqWorkflow = async (req, res) => {
     source.mass_production = { status: "NOT_READY" };
     source.linked_project = undefined;
     source.purchase_items = [];
-    source.stage_attachments = {};
+    source.stage_attachments = { CUSTOMER_RFQ_RECEIVED: parent.stage_attachments?.get?.("CUSTOMER_RFQ_RECEIVED") || parent.stage_attachments?.CUSTOMER_RFQ_RECEIVED || [] };
     source.stage_history = [{ stage: "CUSTOMER_RFQ_RECEIVED", action: "COMPLETED", user: req.user._id, note: `Workflow ${workflowNumber} started`, completedAt: new Date() }];
     source.stage_remarks = [];
-    source.stage_schedule = STAGES.map((stage) => ({ stage, target_date: stage === "DOCUMENT_REVIEW" ? initialDate : undefined, completed_date: stage === "CUSTOMER_RFQ_RECEIVED" ? new Date() : undefined }));
+    source.stage_schedule = STAGES.map((stage) => ({ stage, target_date: initialDateMap.has(stage) ? new Date(initialDateMap.get(stage)) : undefined, completed_date: stage === "CUSTOMER_RFQ_RECEIVED" ? new Date() : undefined }));
     const workflow = await RfqWorkflow.create(source);
-    parent.workflow_started = true;
-    await parent.save();
+    // Only activate if a privileged status change did not happen while the workflow was being prepared.
+    const activated = await RfqItem.findOneAndUpdate(
+      { _id: parent._id, register_status: { $in: ["PENDING", "ACTIVE"] }, lifecycle_status: "ACTIVE" },
+      { $set: { workflow_started: true, register_status: "ACTIVE" } },
+      { new: true }
+    );
+    if (!activated) {
+      await RfqWorkflow.deleteOne({ _id: workflow._id });
+      await releaseLock();
+      return res.status(409).json({ error: "RFQ status changed while the workflow was being started. Refresh and try again." });
+    }
+    await releaseLock();
     res.status(201).json({ success: true, message: "Batch workflow started", workflow });
-  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+  } catch (e) {
+    try { await releaseLock(); } catch (releaseError) { console.error("Unable to release RFQ workflow lock", releaseError); }
+    res.status(400).json({ success: false, error: e.message });
+  }
 };
 
 export const updateRfqLifecycle = async (req, res) => {
   try {
     const rfq = await RfqItem.findById(req.params.rfqItemID);
     if (!rfq) return res.status(404).json({ error: "RFQ not found" });
-    if (!canUpdateRfq(req.user, rfq)) return res.status(403).json({ error: "You do not have permission to change this RFQ status" });
-    const action = String(req.body.action || "").toUpperCase();
-    const reason = String(req.body.reason || "").trim();
-    const current = rfq.lifecycle_status || "ACTIVE";
-    const allowed = { PAUSE: ["ACTIVE"], RESUME: ["PAUSED"], COMPLETE: ["ACTIVE", "PAUSED"], CANCEL: ["ACTIVE", "PAUSED"] };
-    if (!allowed[action]) return res.status(400).json({ error: "Invalid RFQ action" });
-    if (!allowed[action].includes(current)) return res.status(409).json({ error: `Cannot ${action.toLowerCase()} an RFQ in ${current} status` });
-    if (["PAUSE", "COMPLETE", "CANCEL"].includes(action) && !reason) return res.status(400).json({ error: "Please provide a reason" });
-    const now = new Date();
-    const workflows = await RfqWorkflow.find({ parent_rfq: rfq._id });
-    if (action === "PAUSE") {
-      rfq.lifecycle_status = "PAUSED";
-      for (const workflow of workflows) {
-        if ((workflow.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS") {
-          workflow.status_before_parent_pause = "IN_PROGRESS";
-          workflow.lifecycle_status = "PAUSED";
-          workflow.paused_by_parent = true;
-          workflow.lifecycle_updated_at = now;
-          await workflow.save();
-        }
-      }
-    } else if (action === "RESUME") {
-      rfq.lifecycle_status = "ACTIVE";
-      for (const workflow of workflows) {
-        if (workflow.lifecycle_status === "PAUSED" && workflow.paused_by_parent) {
-          workflow.lifecycle_status = workflow.status_before_parent_pause || "IN_PROGRESS";
-          workflow.status_before_parent_pause = undefined;
-          workflow.paused_by_parent = false;
-          workflow.lifecycle_updated_at = now;
-          await workflow.save();
-        }
-      }
-    } else {
-      rfq.lifecycle_status = action === "COMPLETE" ? "COMPLETED" : "CANCELLED";
-      for (const workflow of workflows) {
-        if ((workflow.lifecycle_status || "IN_PROGRESS") === "IN_PROGRESS" || (workflow.lifecycle_status === "PAUSED" && workflow.paused_by_parent)) {
-          workflow.lifecycle_status = action === "COMPLETE" ? "STOPPED_BY_RFQ_COMPLETION" : "STOPPED_BY_RFQ_CANCELLATION";
-          workflow.paused_by_parent = false;
-          workflow.status_before_parent_pause = undefined;
-          workflow.lifecycle_updated_at = now;
-          await workflow.save();
-        }
-      }
+    const status = String(req.body.status || "").toUpperCase();
+    if (!RFQ_STATUS_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ error: "Only Admin, Super User or NPD Manager can change RFQ status" });
     }
-    rfq.lifecycle_updated_at = now;
-    rfq.lifecycle_reason = reason || (action === "RESUME" ? "RFQ resumed" : "");
-    await rfq.save();
-    res.json({ success: true, message: `RFQ ${action.toLowerCase()} successful`, lifecycle_status: rfq.lifecycle_status });
-  } catch (e) { res.status(400).json({ success: false, error: e.message }); }
+    if (!["ACTIVE", "HOLD", "CANCEL", "COMPLETED"].includes(status)) return res.status(400).json({ error: "Invalid RFQ status" });
+    if (status === "ACTIVE" && rfq.register_status !== "HOLD") return res.status(409).json({ error: "Only an RFQ on Hold can be resumed" });
+    const nextStatus = status === "ACTIVE" && !(await RfqWorkflow.exists({ parent_rfq: rfq._id })) ? "PENDING" : status;
+    const allowedCurrent = status === "ACTIVE" ? ["HOLD"] : ["PENDING", "ACTIVE", "HOLD"];
+    const now = new Date();
+    const parentLifecycle = nextStatus === "HOLD" ? "PAUSED" : nextStatus === "CANCEL" ? "CANCELLED" : nextStatus === "COMPLETED" ? "COMPLETED" : "ACTIVE";
+    const updated = await RfqItem.findOneAndUpdate(
+      { _id: rfq._id, register_status: { $in: allowedCurrent } },
+      { $set: {
+        register_status: nextStatus,
+        lifecycle_status: parentLifecycle,
+        lifecycle_updated_at: now,
+        lifecycle_reason: String(req.body.reason || "").trim()
+      } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) return res.status(409).json({ error: "RFQ status cannot be changed from its current state" });
+
+    if (nextStatus === "HOLD") {
+      await RfqWorkflow.updateMany(
+        { parent_rfq: rfq._id, lifecycle_status: "IN_PROGRESS" },
+        { $set: { lifecycle_status: "PAUSED", paused_by_parent: true, status_before_parent_pause: "IN_PROGRESS", lifecycle_updated_at: now } }
+      );
+    } else if (nextStatus === "ACTIVE" || nextStatus === "PENDING") {
+      await RfqWorkflow.updateMany(
+        { parent_rfq: rfq._id, lifecycle_status: "PAUSED", paused_by_parent: true },
+        { $set: { lifecycle_status: "IN_PROGRESS", paused_by_parent: false, lifecycle_updated_at: now }, $unset: { status_before_parent_pause: 1 } }
+      );
+    } else {
+      const stoppedStatus = nextStatus === "COMPLETED" ? "STOPPED_BY_RFQ_COMPLETION" : "STOPPED_BY_RFQ_CANCELLATION";
+      await RfqWorkflow.updateMany(
+        { parent_rfq: rfq._id, $or: [{ lifecycle_status: "IN_PROGRESS" }, { lifecycle_status: "PAUSED", paused_by_parent: true }] },
+        { $set: { lifecycle_status: stoppedStatus, paused_by_parent: false, lifecycle_updated_at: now }, $unset: { status_before_parent_pause: 1 } }
+      );
+    }
+    res.json({ success: true, register_status: updated.register_status });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 };
 
 export const getRfqWorkflowInstance = async (req, res) => {
@@ -600,6 +670,7 @@ export const editWorkflowStage = async (req, res) => {
     if (!workflow) return res.status(404).json({ error: "Workflow not found" });
     await assertWorkflowCanMutate(workflow, req.params.rfqItemID);
     if (!permissionsFor(req.user, workflow).can_edit) return res.status(403).json({ error: "You do not have permission to edit submitted stages" });
+    if (req.body.target_date && !RFQ_EDIT_ROLES.includes(req.user.role)) return res.status(403).json({ error: "Only Scrum Master, Super User or Admin can change target dates" });
     const result = await editStageRecord(workflow._id, req.params.stage, req.body, RfqWorkflow);
     res.json({ success: true, message: "Workflow stage updated", rfqItem: result });
   } catch (e) { res.status(400).json({ error: e.message }); }
@@ -613,4 +684,40 @@ export const workflowPurchaseItems = async (req, res) => {
     const updated = await savePurchaseItems(workflow._id, req.body.stage, req.body.items, req.user, RfqWorkflow);
     res.json({ success: true, message: "Workflow purchase items saved", purchase_items: updated.purchase_items });
   } catch (e) { res.status(400).json({ error: e.message }); }
+};
+
+// Upload files through the configured storage driver; MongoDB stores only metadata/URLs.
+export const uploadRfqAttachments = async (req, res) => {
+  try {
+    const files = (req.files || []).map((file) => serializeUploadedFile(file, req));
+    res.status(201).json({ success: true, attachments: files });
+  } catch (error) { res.status(400).json({ success: false, error: error.message }); }
+};
+
+export const getRfqDetailReport = async (req, res) => {
+  try {
+    const rfq = await RfqItem.findOne({ _id: req.params.rfqItemID, ...rfqScope(req.user) })
+      .populate("project_owner", "name email").populate("stage_history.user", "name").lean();
+    if (!rfq) return res.status(404).json({ error: "RFQ not found" });
+    const workflows = await RfqWorkflow.find({ parent_rfq: rfq._id }).lean();
+    const attachments = [];
+    const addFiles = (stage, files = []) => files.forEach((file) => attachments.push({ ...file, stage }));
+    Object.entries(rfq.stage_attachments || {}).forEach(([stage, files]) => addFiles(stage, files));
+    (rfq.main_parts || []).forEach((part) => {
+      addFiles(`Main part ${part.main_part_no}`, part.drawing_attachments);
+      (part.sub_parts || []).forEach((sub) => addFiles(`Sub part ${sub.sub_part_no}`, sub.drawing_attachments));
+    });
+    workflows.forEach((workflow) => Object.entries(workflow.stage_attachments || {}).forEach(([stage, files]) => addFiles(`${workflow.workflow_number} · ${stage}`, files)));
+    res.json({ rfq, workflows, attachments });
+  } catch (error) { res.status(500).json({ error: error.message }); }
+};
+
+export const downloadRfqAttachment = async (req, res) => {
+  try {
+    const filename = path.basename(req.params.filename || "");
+    const filePath = path.join(uploadRootDirectory, filename);
+    if (!filename || !fs.existsSync(filePath)) return res.status(404).json({ error: "Attachment not found" });
+    res.setHeader("Content-Disposition", `${req.query.download === "1" ? "attachment" : "inline"}; filename*=UTF-8''${encodeURIComponent(filename)}`);
+    res.sendFile(filePath);
+  } catch (error) { res.status(400).json({ error: error.message }); }
 };

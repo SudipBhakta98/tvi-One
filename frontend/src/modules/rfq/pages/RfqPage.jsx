@@ -4,7 +4,10 @@ import {
   Activity,
   BarChart3,
   IndianRupee,
-  Target,
+  PauseCircle,
+  Ban,
+  CheckCircle2,
+  Workflow,
 } from "lucide-react";
 
 import { useAuth } from "../../auth/contexts/AuthContext";
@@ -19,15 +22,9 @@ import {
 import RfqRegister from "../components/RfqRegister";
 import RfqCreatePage from "./RfqCreatePage";
 import RfqDetailPage from "./RfqDetailPage";
+import RfqWorkflowDetailPage from "./RfqWorkflowDetailPage";
 import useRfqFilters from "../hooks/useRfqFilters";
 import { RFQ_CREATE_ROLES, formatMoney } from "../components/rfqConfig";
-
-const DECIDED_STATUSES = [
-  "AWARDED",
-  "LOST",
-];
-
-const PERCENT = 100;
 
 export default function RfqPage() {
   const { user } = useAuth();
@@ -42,6 +39,7 @@ export default function RfqPage() {
   const canCreate = RFQ_CREATE_ROLES.includes(user?.role);
   const showCreate = params.get("create") === "1" && canCreate;
   const selectedId = params.get("id");
+  const selectedWorkflowId = params.get("workflow");
 
   useEffect(() => {
     load({ params: columnFilters.params }).catch(() => {});
@@ -78,59 +76,16 @@ export default function RfqPage() {
     });
   }, [rows, filters]);
 
-  /**
-   * KPI calculations are based on filteredRows.
-   */
-  const stats = useMemo(() => {
-    const quoted = filteredRows.reduce(
-      (sum, r) =>
-        sum + Number(r.total_quoted_value || 0),
-      0
-    );
-
-    const quotedCount = filteredRows.filter(
-      (r) =>
-        Number(r.total_quoted_value || 0) > 0
-    ).length;
-
-    const awarded = filteredRows.filter(
-      (r) => Number(r.total_awarded_value || 0) > 0
-    );
-
-    const decided = filteredRows.filter(
-      (r) => DECIDED_STATUSES.includes(r.rfq_status)
-    );
-
-    return {
-      total: filteredRows.length,
-
-      active: filteredRows.filter(
-        (r) => Number(r.workflow_count || 0) > 0 && !["AWARDED", "LOST"].includes(r.rfq_status)
-      ).length,
-
-      awarded: awarded.length,
-
-      completed: filteredRows.filter(
-        (r) => r.workflow_count > 0 && r.current_stage === "COMPLETED"
-      ).length,
-
-      quoted,
-
-      awardedValue: awarded.reduce(
-        (sum, r) =>
-          sum + Number(r.total_awarded_value || 0),
-        0
-      ),
-
-      avgQuote: quotedCount
-        ? quoted / quotedCount
-        : 0,
-
-      decisionRate: decided.length
-        ? (awarded.length / decided.length) * PERCENT
-        : 0,
-    };
-  }, [filteredRows]);
+  const stats = useMemo(() => ({
+    total: filteredRows.length,
+    active: filteredRows.filter((r) => r.register_status === "ACTIVE").length,
+    pending: filteredRows.filter((r) => (r.register_status || "PENDING") === "PENDING").length,
+    hold: filteredRows.filter((r) => r.register_status === "HOLD").length,
+    cancel: filteredRows.filter((r) => r.register_status === "CANCEL").length,
+    completed: filteredRows.filter((r) => r.register_status === "COMPLETED").length,
+    awardedValue: filteredRows.reduce((sum, r) => sum + Number(r.total_awarded_value || 0), 0),
+    activeBatch: filteredRows.reduce((sum, r) => sum + Number(r.active_workflow_count || 0), 0),
+  }), [filteredRows]);
 
   const backToRegister = () => {
     setParams({});
@@ -152,12 +107,23 @@ export default function RfqPage() {
     );
   }
 
+  if (selectedId && selectedWorkflowId) {
+    return <RfqWorkflowDetailPage
+      rfqId={selectedId}
+      workflowId={selectedWorkflowId}
+      user={user}
+      onClose={() => setParams({ id: selectedId })}
+      onChanged={reload}
+    />;
+  }
+
   if (selectedId) {
     return (
       <RfqDetailPage
         rfqId={selectedId}
         user={user}
         onClose={backToRegister}
+        onOpenWorkflow={(workflowId) => setParams({ id: selectedId, workflow: workflowId })}
         onChanged={reload}
       />
     );
@@ -182,67 +148,16 @@ export default function RfqPage() {
 
       {loadError && <Alert>{loadError}</Alert>}
 
-      {/* KPI */}
-      <div className="grid grid-cols-2 xl:grid-cols-8 gap-2">
-        <KpiCard
-          label="Total RFQs"
-          value={stats.total}
-          hint="Filtered pipeline"
-          tone="blue"
-          icon={BarChart3}
-        />
-
-        <KpiCard
-          label="Active / Pending"
-          value={stats.active}
-          hint="Filtered open pipeline"
-          tone="amber"
-          icon={Activity}
-        />
-
-        <KpiCard
-          label="Awarded"
-          value={stats.awarded}
-          hint="Filtered awarded RFQs"
-          tone="green"
-          icon={Target}
-        />
-
-        <KpiCard
-          label="Completed"
-          value={stats.completed}
-          hint="Filtered lifecycle complete"
-          tone="blue"
-        />
-
-        <KpiCard
-          label="Quoted Value"
-          value={formatMoney(stats.quoted)}
-          hint="Filtered RFQs with costing"
-          tone="green"
-          icon={IndianRupee}
-        />
-
-        <KpiCard
-          label="Awarded Value"
-          value={formatMoney(stats.awardedValue)}
-          hint="Filtered awarded value"
-          tone="green"
-        />
-
-        <KpiCard
-          label="Avg Quote"
-          value={formatMoney(stats.avgQuote)}
-          hint="Filtered average"
-          tone="blue"
-        />
-
-        <KpiCard
-          label="Decision Rate"
-          value={`${stats.decisionRate.toFixed(1)}%`}
-          hint="Awarded / decided"
-          tone="amber"
-        />
+      {/* RFQ lifecycle KPIs */}
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-8">
+        <KpiCard label="Total RFQ" value={stats.total} hint="Filtered RFQ register" tone="blue" icon={BarChart3} />
+        <KpiCard label="Active RFQ" value={stats.active} hint="At least one workflow started" tone="green" icon={Activity} />
+        <KpiCard label="Pending RFQ" value={stats.pending} hint="No batch workflow started" tone="amber" />
+        <KpiCard label="Hold RFQ" value={stats.hold} hint="Manually placed on hold" tone="amber" icon={PauseCircle} />
+        <KpiCard label="Cancel RFQ" value={stats.cancel} hint="Cancelled RFQs" tone="red" icon={Ban} />
+        <KpiCard label="Completed RFQ" value={stats.completed} hint="Completed RFQs" tone="blue" icon={CheckCircle2} />
+        <KpiCard label="Awarded Value" value={formatMoney(stats.awardedValue)} hint="Awarded batch workflow value" tone="green" icon={IndianRupee} />
+        <KpiCard label="Active Batch Workflow" value={stats.activeBatch} hint="Currently in progress" tone="blue" icon={Workflow} />
       </div>
 
       <RfqRegister

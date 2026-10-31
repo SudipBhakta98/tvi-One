@@ -1,7 +1,7 @@
 import { FilterBar, Panel, StatusBadge, Table, EmptyState } from "../../../components/ui";
 import RfqFilterBar from "./RfqFilterBar";
 
-const COLUMNS = ["RFQ No", "Customer Name", "Project Name", "Project Owner", "Main Part Qty", "Sub Part Qty", "Total Quoted Value", "Total Awarded Value", "Status"];
+const COLUMNS = ["RFQ No", "Customer Name", "Project Name", "Project Owner", "Main Part Qty", "Sub Part Qty", "Total Quoted Value", "Total Awarded Value", "Workflows", "Awarded / Lost", "RFQ Status"];
 
 /**
  * RFQ register. Search filters in the browser; the Excel-style column filters (Month included) are applied by the server,
@@ -29,7 +29,9 @@ export default function RfqRegister({ rows, options, columnFilters, hasColumnFil
                 <td className="px-3 py-2 text-slate-600">{r.sub_part_qty ?? (r.main_parts || []).reduce((count, part) => count + (part.sub_parts?.length || 0), 0)}</td>
                 <td className="px-3 py-2 font-semibold text-emerald-600">{`₹${Number(r.total_quoted_value || 0).toLocaleString("en-IN")}`}</td>
                 <td className="px-3 py-2 font-semibold text-emerald-600">{`₹${Number(r.total_awarded_value || 0).toLocaleString("en-IN")}`}</td>
-                <td className="px-3 py-2"><StatusBadge status={r.lifecycle_status || "ACTIVE"} /></td>
+                <td className="px-3 py-2 text-slate-700">{r.total_workflows || 0}</td>
+                <td className="px-3 py-2 text-slate-700">{r.awarded_workflow_count || 0} / {r.lost_workflow_count || 0}</td>
+                <td className="px-3 py-2"><StatusBadge status={r.register_status || "PENDING"} /></td>
               </tr>
             ))}
           </Table>

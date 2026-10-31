@@ -3,7 +3,7 @@ import RfqWorkflow from "../models/rfqWorkflowModel.js";
 import Component from "../models/componentModel.js";
 import convertRfqToProject from "./convertRfqToProject.js";
 import { ROLES } from "../../../constants/roles.js";
-import { EDIT_ROLES, isProjectOwner } from "./rfqPermissions.js";
+import { EDIT_ROLES, RFQ_EDIT_ROLES, isProjectOwner } from "./rfqPermissions.js";
 
 export const STAGES = [
   "CUSTOMER_RFQ_RECEIVED", "DOCUMENT_REVIEW", "TECHNICAL_REVIEW", "FEASIBILITY_REVIEW",
@@ -37,7 +37,7 @@ export const canActOnStage = (user, rfq, stage) =>
   EDIT_ROLES.includes(user.role) || isProjectOwner(user, rfq) || Boolean(STAGE_EXTRA_ROLES[stage]?.includes(user.role));
 
 // Stages that cannot be completed without at least one attachment. Add a stage key here to make its upload mandatory.
-const ATTACHMENT_REQUIRED_STAGES = new Set(["CUSTOMER_DECISION", "CUSTOMER_APPROVAL_PILOT", "CUSTOMER_APPROVAL_MASS_PRODUCTION", "CUSTOMER_PO_RECEIVED"]);
+const ATTACHMENT_REQUIRED_STAGES = new Set(STAGES.filter((stage) => stage !== "CUSTOMER_RFQ_RECEIVED"));
 
 // A positive customer answer at these stages opens the next target-date phase (collected in the same request).
 const NEXT_PHASE_AFTER = { CUSTOMER_DECISION: "PROTOTYPE", CUSTOMER_APPROVAL_PILOT: "PILOT", CUSTOMER_APPROVAL_MASS_PRODUCTION: "MASS_PRODUCTION" };
@@ -131,7 +131,7 @@ const toDate = (value, label) => {
   return date;
 };
 const normalizeAttachments = (items, now) => items.map((item) => ({
-  file_name: item.file_name, file_type: item.file_type || "", file_size: Number(item.file_size || 0), url: item.url || "", storage_provider: item.storage_provider || "PENDING_CLOUD_UPLOAD", uploaded_at: item.uploaded_at ? new Date(item.uploaded_at) : now,
+  file_name: item.file_name, file_path: item.file_path || "", file_type: item.file_type || "", file_size: Number(item.file_size || 0), url: item.url || "", storage_provider: item.storage_provider || "PENDING_CLOUD_UPLOAD", uploaded_at: item.uploaded_at ? new Date(item.uploaded_at) : now,
 }));
 const attachmentsOf = (rfq) => (rfq.stage_attachments instanceof Map ? Object.fromEntries(rfq.stage_attachments) : (rfq.stage_attachments || {}));
 
@@ -168,12 +168,14 @@ export const transitionRfq = async (rfqId, stage, data, user, Model = RfqItem) =
   if (!rfq) throw new Error("RFQ/workflow not found");
   if (rfq.lifecycle_status && rfq.lifecycle_status !== "IN_PROGRESS") throw new Error(`Workflow is ${rfq.lifecycle_status.toLowerCase().replaceAll("_", " ")} and cannot advance`);
   if (!canActOnStage(user, rfq, stage)) throw new Error(`Role ${user.role} cannot perform ${stage}`);
+  if ((data.target_date || data.target_dates) && !RFQ_EDIT_ROLES.includes(user.role)) {
+    throw new Error("Only Scrum Master, Super User or Admin can set workflow target dates");
+  }
   if (rfq.current_stage !== stage) throw new Error(`Current stage is ${label(String(rfq.current_stage))}`);
 
   for (const prerequisite of prerequisites[stage]) {
     if (!completed(rfq, prerequisite)) throw new Error(`${label(prerequisite)} must be completed first`);
   }
-  if (!rfq.stage_remarks?.some((remark) => remark.stage === stage)) throw new Error("Add at least one remark before completing this stage");
 
   if (TARGET_DATE_STAGES.has(stage) && !getScheduleEntry(rfq, stage)?.target_date && !data.target_date) {
     throw new Error(`Set the target date for ${label(stage)} before completing this stage`);

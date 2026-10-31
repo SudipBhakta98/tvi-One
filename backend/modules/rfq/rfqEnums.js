@@ -3,7 +3,10 @@ export const REVIEW_STATUS = ["IN_PROGRESS", "DONE", "REJECTED"];
 export const FEASIBILITY_STATUS = ["FEASIBLE", "NOT_FEASIBLE", "CONDITIONAL"];
 export const TOOLING_CATEGORY = ["NEW_TOOL", "EXISTING_TOOL", "MODIFICATION", "NOT_REQUIRED"];
 export const COSTING_STATUS = ["COSTING_IN_PROGRESS", "SUBMITTED_TO_CUSTOMER", "APPROVED", "REJECTED"];
+// Workflow/customer decision status (preserved for backward compatibility).
 export const RFQ_STATUS = ["WAITING_FOR_APPROVAL", "ACTIVE", "ON_HOLD", "AWARDED", "LOST", "CANCELLED"];
+// Parent RFQ register lifecycle is deliberately separate from workflow outcomes.
+export const REGISTER_STATUS = ["PENDING", "ACTIVE", "HOLD", "CANCEL", "COMPLETED"];
 export const PROTO_BUILD_STATUS = ["NOT_STARTED", "IN_PROGRESS", "PROTO_SUBMITTED", "PROTO_APPROVED", "REJECTED"];
 export const CAPEX_STATUS = ["NOT_STARTED", "IN_PROGRESS", "APPROVED", "NOT_REQUIRED"];
 export const PILOT_BUILD_STATUS = ["NOT_STARTED", "IN_PROGRESS", "SUBMITTED", "APPROVED", "REJECTED"];

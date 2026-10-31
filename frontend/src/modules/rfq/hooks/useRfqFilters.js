@@ -11,7 +11,7 @@ export const FILTER_COLUMNS = [
   { key: "project_name", title: "Project" },
   { key: "project_owner", title: "Project Owner" },
   { key: "current_stage", title: "Current Stage" },
-  { key: "rfq_status", title: "Status" },
+  { key: "register_status", title: "RFQ Status" },
 ];
 const EMPTY_FILTERS = Object.fromEntries(FILTER_COLUMNS.map(({ key }) => [key, []]));
 

@@ -18,6 +18,7 @@ export const ENDPOINTS = {
 
   PRODUCTION: { BASE: "/production", STAGES: "/stages", MACHINES: "/machines" },
   WAREHOUSE: { BASE: "/warehouse" },
+  ATTENDANCE: { UPLOAD: "/attendance/upload", REPORT: "/attendance/report", EXPORT: "/attendance/report/export" },
   DISPATCH: { BASE: "/dispatch" },
 
   DASHBOARD: {
